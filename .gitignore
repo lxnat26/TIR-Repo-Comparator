@@ -34,3 +34,6 @@ lerna-debug.log*
 
 # Vite specific cache
 .vite
+
+# Local Python virtual environment (contains machine-specific binaries and libraries)
+venv/
