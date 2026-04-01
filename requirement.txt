@@ -1,0 +1,17 @@
+# --- CORE FRAMEWORKS ---
+unstructured[all-docs]==0.15.*
+crewai==0.51.*
+langchain==0.2.*
+chromadb==0.5.*
+
+# --- DOCUMENT HANDLING ---
+python-docx
+pymupdf
+pypandoc
+
+# --- BACKEND SERVER ---
+fastapi
+uvicorn
+
+# --- AI CONNECTIVITY ---
+ollama
