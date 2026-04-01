@@ -1,13 +1,19 @@
+# =========================
 # Node dependencies
+# =========================
 node_modules
 .pnpm-store
 
+# =========================
 # Build outputs
+# =========================
 dist
 dist-ssr
 *.local
 
+# =========================
 # Logs
+# =========================
 logs
 *.log
 npm-debug.log*
@@ -16,12 +22,34 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# =========================
 # Environment variables
+# =========================
 .env
 .env.local
 .env.*.local
 
-# Editor/OS specific
+# =========================
+# Python virtual environment
+# =========================
+.venv/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# =========================
+# ChromaDB vector storage
+# =========================
+SmartRepo/chroma_store/
+smart_repo/chroma_store/
+chroma_store/
+
+# =========================
+# Editor / OS specific
+# =========================
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -32,5 +60,19 @@ lerna-debug.log*
 *.sln
 *.sw?
 
-# Vite specific cache
+# =========================
+# Vite cache
+# =========================
 .vite
+
+# =========================
+# Jupyter notebooks
+# =========================
+.ipynb_checkpoints/
+
+# =========================
+# Python build artifacts
+# =========================
+build/
+dist/
+*.egg-info/
