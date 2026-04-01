@@ -1,24 +1,36 @@
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-*.egg-info/
+# Node dependencies
+node_modules
+.pnpm-store
 
-# Node + Vite
-node_modules/
-.vite/
-dist/
+# Build outputs
+dist
 dist-ssr
 *.local
 
-# Editor directories and files
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Editor/OS specific
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
-.env
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# Vite specific cache
+.vite
