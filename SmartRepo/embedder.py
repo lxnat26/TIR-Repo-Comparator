@@ -1,10 +1,9 @@
-import requests
-from config import OLLAMA_URL, EMBED_MODEL
+import ollama
+from config import EMBED_MODEL
 
 def convert_to_vector(text):
-    response = requests.post(OLLAMA_URL, json={"model": EMBED_MODEL, "prompt": text})
-    data = response.json()
-    vector = data["embedding"]
+    response = ollama.embeddings(model=EMBED_MODEL, prompt=text)
+    vector = response["embedding"]
 
     return vector
 
