@@ -62,6 +62,7 @@ chroma_store/
 *.njsproj
 *.sln
 *.sw?
+.claude
 
 # =========================
 # Vite cache
