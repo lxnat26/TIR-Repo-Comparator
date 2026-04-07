@@ -1,61 +1,68 @@
 import os
-from crewai import Agent, Task, Crew, LLM
+import base64
+from langchain_ollama import ChatOllama
+from langchain_core.messages import HumanMessage
 
-# 1. Configuration: Connect to your LOCAL Ollama Vision Model
-# Make sure you ran 'ollama pull llama3.2-vision' first!
-vision_llm = LLM(
-    model="ollama/llama3.2-vision",
-    base_url="http://localhost:11434"
-)
+# 1. Setup the Vision Model
+# This is the "Brain" that can see images
+llm = ChatOllama(model="llama3.2-vision")
 
-# 2. Define the Specialist Agent
-image_analyst = Agent(
-    role="Pharmaceutical Data Analyst",
-    goal="Extract and summarize clinical data from charts and tables.",
-    backstory="""You are an expert at reading medical research graphs. 
-    You identify drug names, dosages, and efficacy percentages (like p-values or PFS).
-    You turn complex visuals into clear, 2-sentence summaries.""",
-    llm=vision_llm,
-    allow_delegation=False
-)
+def encode_image(image_path):
+    """Helper: Converts an image file into a Base64 string for the AI."""
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode("utf-8")
 
-def process_report_images(markdown_file, image_folder):
-    # Read the markdown file created in Step 2
-    with open(markdown_file, "r") as f:
-        content = f.read()
+def describe_images(image_folder):
+    descriptions = []
+    # Grab all the images your parser.py cropped
+    image_files = [f for f in os.listdir(image_folder) if f.endswith(('.png', '.jpg', '.jpeg'))]
 
-    # Look for all image files in the extracted folder
-    images = [f for f in os.listdir(image_folder) if f.endswith(('.png', '.jpg', '.jpeg'))]
-    
-    print(f"Found {len(images)} images to analyze...")
+    if not image_files:
+        print("❌ No images found. Did you run parser.py?")
+        return
 
-    for img in images:
-        img_path = os.path.join(image_folder, img)
-        
-        # 3. Create the Task for this specific image
-        analysis_task = Task(
-            description=f"Analyze this image: {img_path}. What data does it show regarding the trial results?",
-            expected_output="A brief, professional summary of the chart's key data point.",
-            agent=image_analyst
+    print(f"--- 👁️ LangChain is analyzing {len(image_files)} images ---")
+
+    for image_file in image_files:
+        image_path = os.path.join(image_folder, image_file)
+        base64_image = encode_image(image_path)
+
+        # 2. Create the Multimodal Message
+        # We send both the text prompt AND the image data
+        message = HumanMessage(
+            content=[
+                {
+                    "type": "text", 
+                    "text": (
+                        "Describe this pharmaceutical chart or table in 2-3 sentences. Focus on the data and trends. "
+                        "CRITICAL: If a data point or bar is exactly on a whole number line (like 4), "
+                        "do not provide a range or estimate (e.g., do not say '4 to 4.5'). "
+                        "Use the exact integer shown on the axis."
+                    )
+                },
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"},
+                },
+            ],
         )
 
-        # 4. Run the Crew
-        crew = Crew(agents=[image_analyst], tasks=[analysis_task])
-        print(f"--- Analyzing {img} ---")
-        result = crew.kickoff()
+        # 3. Get the Response
+        print(f"🔍 Analyzing {image_file}...")
+        response = llm.invoke([message])
+        
+        descriptions.append(f"IMAGE: {image_file}\nDESCRIPTION: {response.content}\n")
 
-        # 5. Update the Markdown: Replace the [PENDING] tag with the real data
-        # Note: We look for the image filename in the markdown to find the right spot
-        placeholder = f"![Analysis Needed]({img})"
-        if placeholder in content:
-            interpretation = f"\n**AI Analysis:** {result}\n"
-            content = content.replace("> [PENDING AI INTERPRETATION]", interpretation, 1)
-
-    # Save the 'Enriched' Markdown
-    with open(markdown_file, "w") as f:
-        f.write(content)
+    # 4. Save to a text file
+    output_path = "processed_reports/image_descriptions.txt"
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(descriptions))
     
-    print("--- Report Enrichment Complete! ---")
+    print(f"--- ✅ Done! Descriptions saved to {output_path} ---")
 
-# To test:
-# process_report_images("processed_reports/your_report.md", "processed_reports/images")
+if __name__ == "__main__":
+    IMAGE_DIR = "processed_reports/images"
+    if os.path.exists(IMAGE_DIR):
+        describe_images(IMAGE_DIR)
+    else:
+        print(f"❌ Error: {IMAGE_DIR} not found.")
