@@ -1,49 +1,48 @@
 import os
 from unstructured.partition.pdf import partition_pdf
-from unstructured.staging.base import convert_to_islands
 
-# 1. Setup folders for our results
+# 1. Setup the Folders
+# We need a place to put the "shredded" text and the "cropped" images
 OUTPUT_DIR = "processed_reports"
 IMAGE_DIR = os.path.join(OUTPUT_DIR, "images")
-os.makedirs(IMAGE_DIR, exist_ok=True)
 
-def parse_document_to_markdown(file_path):
-    print(f"--- Starting Parse: {file_path} ---")
+if not os.path.exists(IMAGE_DIR):
+    os.makedirs(IMAGE_DIR)
 
-    # 2. The "Hi-Res" strategy tells the AI to "look" for images and tables
+def run_smart_parser(pdf_path):
+    print(f"--- 🚀 Starting Smart Parse on: {pdf_path} ---")
+
+    # 2. The "Shredder" (partition_pdf)
+    # This is the heavy lifter. It 'looks' at the PDF layout.
     elements = partition_pdf(
-        filename=file_path,
-        strategy="hi_res",                   # Uses Computer Vision to find layout
-        extract_image_block_types=["Image"], # Specifically look for images
-        extract_image_block_output_dir=IMAGE_DIR, # Where to save the .png files
+        filename=pdf_path,
+        strategy="hi_res",           # 'hi_res' is required to find images/tables
+        extract_images_in_pdf=True,  # This tells the code to "crop" charts
+        extract_image_block_output_dir=IMAGE_DIR, # Where to save those crops
+        infer_table_structure=True,  # Tries to turn tables into text
+        chunking_strategy="by_title",# Groups text by headers (e.g. 'Results')
+        max_characters=4000,
+        new_after_n_chars=3800,
     )
 
-    # 3. Convert the elements into a clean Markdown string
-    markdown_content = ""
-    for el in elements:
-        # Check the type of element (Header, NarrativeText, etc.)
-        if el.category == "Title":
-            markdown_content += f"# {el.text}\n\n"
-        elif el.category == "ListItem":
-            markdown_content += f"* {el.text}\n"
-        elif el.category == "Image":
-            # If it's an image, we leave a placeholder for our CrewAI agent
-            # We use the metadata to find the filename Unstructured assigned
-            image_filename = el.metadata.image_path if hasattr(el.metadata, 'image_path') else "unknown_image.png"
-            markdown_content += f"\n![Analysis Needed]({image_filename})\n"
-            markdown_content += "> [PENDING AI INTERPRETATION]\n\n"
-        else:
-            markdown_content += f"{el.text}\n\n"
-
-    # 4. Save the Markdown file
-    report_name = os.path.basename(file_path).replace(".pdf", ".md")
-    save_path = os.path.join(OUTPUT_DIR, report_name)
+    # 3. Create the "Smart" Markdown File
+    # We turn the 'elements' into a clean .md file for the AI to read later
+    md_output_path = os.path.join(OUTPUT_DIR, "final_report.md")
     
-    with open(save_path, "w", encoding="utf-8") as f:
-        f.write(markdown_content)
+    with open(md_output_path, "w", encoding="utf-8") as f:
+        for element in elements:
+            # We add double newlines to keep the AI from getting confused
+            f.write(str(element) + "\n\n")
 
-    print(f"--- Finished! Created: {save_path} and saved images to {IMAGE_DIR} ---")
-    return save_path
+    print(f"--- ✅ Done! Check the '{OUTPUT_DIR}' folder for results. ---")
 
-# To run it, just uncomment the line below with your filename:
-# parse_document_to_markdown("your_report.pdf")
+# --- MAIN EXECUTION ---
+# This looks for any PDF in your current folder and runs the code
+if __name__ == "__main__":
+    # Change "report.pdf" to whatever your PDF is named!
+    target_pdf = "2024_lilly_lebrikizumab_phase2_update.pdf" 
+    
+    if os.path.exists(target_pdf):
+        run_smart_parser(target_pdf)
+    else:
+        print(f"❌ Error: Could not find '{target_pdf}' in your folder.")
