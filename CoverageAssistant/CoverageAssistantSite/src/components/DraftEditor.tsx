@@ -1,7 +1,12 @@
-import { useState } from 'react'
-import { analyzeDraft, AnalysisResult, ClaimResult, ClaimCategory, ClaimStatus } from '../api'
+import { useState, useRef } from 'react'
+import { analyzeDraft, analyzeDocument } from '../api'
+import type { AnalysisResult, ClaimResult, ClaimCategory, ClaimStatus } from '../api'
 
-// ─── Label maps ──────────────────────────────────────────────────────────────
+const ACCEPTED_MIME = new Set([
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/msword',
+])
 
 const CATEGORY_LABEL: Record<ClaimCategory, string> = {
   milestone: 'Milestone',
@@ -18,8 +23,6 @@ const STATUS_LABEL: Record<ClaimStatus, string> = {
   contradiction: 'Contradiction',
   uncertainty: 'Uncertainty',
 }
-
-// ─── Claim card ──────────────────────────────────────────────────────────────
 
 function ClaimCard({ claim }: { claim: ClaimResult }) {
   return (
@@ -62,24 +65,11 @@ function ClaimCard({ claim }: { claim: ClaimResult }) {
           </div>
         </div>
       ) : (
-        claim.whats_new && (
-          <p className="claim-body">{claim.whats_new}</p>
-        )
+        claim.whats_new && <p className="claim-body">{claim.whats_new}</p>
       )}
 
       <div className="claim-why">
-        <svg
-          className="claim-why-icon"
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-        >
+        <svg className="claim-why-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <circle cx="12" cy="12" r="10" />
           <line x1="12" y1="16" x2="12" y2="12" />
           <line x1="12" y1="8" x2="12.01" y2="8" />
@@ -92,23 +82,10 @@ function ClaimCard({ claim }: { claim: ClaimResult }) {
   )
 }
 
-// ─── Empty / loading states ───────────────────────────────────────────────────
-
 function PanelEmpty() {
   return (
     <div className="panel-empty">
-      <svg
-        width="32"
-        height="32"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.25"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        className="panel-empty-icon"
-        aria-hidden="true"
-      >
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" className="panel-empty-icon" aria-hidden="true">
         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
         <polyline points="14 2 14 8 20 8" />
         <line x1="16" y1="13" x2="8" y2="13" />
@@ -117,8 +94,7 @@ function PanelEmpty() {
       </svg>
       <p className="panel-empty-title">No analysis yet</p>
       <p className="panel-empty-body">
-        Paste your draft on the left and click Analyze to see how each claim
-        compares against the report library.
+        Click Analyze Draft to see how each claim compares against the report library.
       </p>
     </div>
   )
@@ -133,35 +109,39 @@ function PanelLoading() {
   )
 }
 
-// ─── Main editor ─────────────────────────────────────────────────────────────
-
-const PLACEHOLDER =
-  `Paste your competitive intelligence draft here.
-
-The Coverage Assistant will break your draft into individual claims and compare each one against the report library, identifying what is new, what has been updated, and what was already reported.`
-
-export function DraftEditor() {
-  const [draftText, setDraftText] = useState('')
-  const [competitor, setCompetitor] = useState('')
-  const [drug, setDrug] = useState('')
+export function DraftEditor({ initialText = '' }: { initialText?: string }) {
+  const [draftText, setDraftText] = useState(initialText)
   const [result, setResult] = useState<AnalysisResult | null>(null)
   const [loading, setLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const wordCount = draftText.trim() === '' ? 0 : draftText.trim().split(/\s+/).length
+
+  async function handleNewFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0]
+    if (!f || !ACCEPTED_MIME.has(f.type)) return
+    e.target.value = ''
+    setUploading(true)
+    setError(null)
+    setResult(null)
+    try {
+      const res = await analyzeDocument(f)
+      setDraftText(res.document_text ?? '')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Upload failed.')
+    } finally {
+      setUploading(false)
+    }
+  }
 
   async function handleAnalyze() {
     if (!draftText.trim()) return
     setLoading(true)
     setError(null)
     try {
-      const res = await analyzeDraft({
-        text: draftText,
-        metadata: {
-          competitor: competitor || undefined,
-          drug: drug || undefined,
-        },
-      })
+      const res = await analyzeDraft({ text: draftText })
       setResult(res)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Analysis failed. Is the backend running?')
@@ -170,57 +150,34 @@ export function DraftEditor() {
     }
   }
 
-  function handleClear() {
-    setDraftText('')
-    setResult(null)
-    setError(null)
-  }
-
   return (
     <div className="editor">
-      {/* ── Left panel: draft input ── */}
+      {/* ── Left panel ── */}
       <div className="editor-left">
         <div className="editor-panel-header">
           <div className="editor-header-left">
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="editor-header-icon"
-              aria-hidden="true"
-            >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="editor-header-icon" aria-hidden="true">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
               <polyline points="14 2 14 8 20 8" />
             </svg>
             <h2 className="editor-panel-title">Draft Report</h2>
-
-            <div className="editor-meta-fields">
-              <input
-                className="meta-input"
-                placeholder="Competitor"
-                value={competitor}
-                onChange={(e) => setCompetitor(e.target.value)}
-              />
-              <input
-                className="meta-input"
-                placeholder="Drug / Asset"
-                value={drug}
-                onChange={(e) => setDrug(e.target.value)}
-              />
-            </div>
           </div>
 
           <div className="editor-header-actions">
-            {draftText && (
-              <button className="btn btn-ghost btn-sm" onClick={handleClear}>
-                Clear
-              </button>
-            )}
+            <input
+              ref={inputRef}
+              type="file"
+              accept=".pdf,.docx,.doc"
+              onChange={handleNewFile}
+              style={{ display: 'none' }}
+            />
+            <button
+              className="btn btn-ghost btn-sm"
+              onClick={() => inputRef.current?.click()}
+              disabled={uploading}
+            >
+              {uploading ? 'Uploading...' : 'Upload New Draft'}
+            </button>
             <button
               className="btn btn-primary"
               onClick={handleAnalyze}
@@ -233,7 +190,6 @@ export function DraftEditor() {
 
         <textarea
           className="editor-textarea"
-          placeholder={PLACEHOLDER}
           value={draftText}
           onChange={(e) => setDraftText(e.target.value)}
           spellCheck
@@ -244,35 +200,22 @@ export function DraftEditor() {
         </div>
       </div>
 
-      {/* ── Right panel: coverage assistant ── */}
+      {/* ── Right panel ── */}
       <div className="editor-right">
         <div className="editor-panel-header">
           <div className="editor-header-left">
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="editor-header-icon"
-              aria-hidden="true"
-            >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="editor-header-icon" aria-hidden="true">
               <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
             </svg>
             <div>
               <h2 className="editor-panel-title">Coverage Assistant</h2>
               {result && (
                 <p className="editor-panel-subtitle">
-                  Reviewing {result.claim_count} section
-                  {result.claim_count !== 1 ? 's' : ''} from your report
+                  Reviewing {result.claim_count} section{result.claim_count !== 1 ? 's' : ''} from your report
                 </p>
               )}
             </div>
           </div>
-
           {result && (
             <span className="badge badge--count">
               {result.claim_count} update{result.claim_count !== 1 ? 's' : ''} found
@@ -289,8 +232,7 @@ export function DraftEditor() {
               <div className="panel-empty">
                 <p className="panel-empty-title">No claims detected</p>
                 <p className="panel-empty-body">
-                  The backend did not return any comparable claims. Try adding more
-                  specific factual statements to your draft.
+                  The backend did not return any comparable claims.
                 </p>
               </div>
             ) : (
