@@ -5,7 +5,7 @@ import shutil
 import uuid
 from datetime import datetime
 
-from SmartRepo.store_reports import ingest_pdf
+from SmartRepo.store_reports import ingest_pdf, collection
 
 app = FastAPI()
 
@@ -40,3 +40,23 @@ async def upload_file(file: UploadFile = File(...)):
         "uploaded_at": datetime.utcnow().isoformat(),
         "status": "ready",
     }
+
+# returns list of all unique documents stored in chromadb
+@app.get("/api/documents")
+async def list_documents():
+    results = collection.get(include=["metadatas"])
+
+    # group chunks by doc_id so we return one entry per document not chunk
+    seen = {}
+    for metadata in results["metadatas"]:
+        doc_id = metadata["doc_id"]
+        if doc_id not in seen:
+            seen[doc_id] = {
+                "id": doc_id,
+                "filename": Path(metadata["source"]).name,
+                "file_type": metadata["file_type"],
+                "uploaded_at": metadata["uploaded_at"],
+                "status": "ready",
+            }
+
+    return list(seen.values())
