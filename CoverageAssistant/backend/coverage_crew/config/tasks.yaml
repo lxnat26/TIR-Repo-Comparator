@@ -23,54 +23,53 @@ claim_extractor_task:
 
 claim_comparator_task:
   description: >
-    You will receive a newly extracted clinical claim.
+    You are given a list of clinical claims, each already paired with its historical
+    match retrieved from the database. The data is provided below.
 
-    You have access to a tool that retrieves historical similar claims.
-    You MUST call Query ChromaDB tool before producing any output.
-    If you do not call the tool, your answer is invalid.
+    CLAIMS WITH HISTORICAL MATCHES:
+    {enriched_claims}
 
-    Your task:
-    - Use the tool to retrieve relevant historical matches
-    - Compare the new claim with retrieved results
-    - Identify similarities, differences, and contradictions
-    - Return structured JSON only
+    For EACH item in the list:
+    - Use "claim_text" as the new_claim value
+    - Use "historical_match" as the historical_match value
+    - Determine what_changed, what_is_same, and whether there is a contradiction
+    - If "historical_match" is "No historical matches found", set all comparison
+      fields to "N/A" and contradiction to false
 
-    If no matches are found, treat historical_match as "N/A".
-
-    Do not simulate tool outputs.
-    Do not guess database contents.
+    Collect all results into a single JSON ARRAY — one object per input item.
+    Return ONLY valid JSON. No markdown. No commentary. No additional keys.
   expected_output: |
-    {
-      "new_claim": "string",
-      "historical_match": "string",
-      "what_changed": "string",
-      "what_is_same": "string",
-      "contradiction": true
-    }
+    [
+      {
+        "new_claim": "string",
+        "historical_match": "string",
+        "what_changed": "string",
+        "what_is_same": "string",
+        "contradiction": false
+      }
+    ]
   agent: claim_comparator
-  context:
-    - claim_extractor_task
 
 claim_classifier_task:
   description: >
-    Receive comparator agent output and classify the claim as 
-    'Already Reported', 'Refined Detail', 'New Information', 
-    'Contradiction', or 'Uncertain' using the provided rules. 
-    Always provide a specific reason explaining your classification. 
-    Write the reason as a clear, concise explanation for a pharmaceutical analyst. 
-    It should explain what was found in prior reports and why this classification was chosen. 
+    Receive the comparator agent output, which is a JSON ARRAY of comparison objects.
+    For EACH object in the array, classify the claim as
+    'Already Reported', 'Refined Detail', 'New Information',
+    'Contradiction', or 'Uncertain' using the provided rules.
+    If historical_match is 'N/A', classification must be 'New Information'.
+    Always provide a specific reason explaining your classification for each claim.
+    Write the reason as a clear, concise explanation for a pharmaceutical analyst.
+    It should explain what was found in prior reports and why this classification was chosen.
     Do not reference field names like 'historical_match' or 'what_changed' — explain the finding in plain language.
-    Return ONLY valid JSON.
-    No markdown.
-    No commentary.
-    No additional keys.
+    Return ONLY a valid JSON ARRAY — one classification object per input comparison object.
+    No markdown. No commentary. No additional keys.
     Output must match schema exactly.
   expected_output: |
-    {
-      "claim": "string",
-      "classification": "Already Reported | Refined Detail | New Information | Contradiction | Uncertain",
-      "reason": "string"
-    }
+    [
+      {
+        "claim": "string",
+        "classification": "Already Reported | Refined Detail | New Information | Contradiction | Uncertain",
+        "reason": "string"
+      }
+    ]
   agent: claim_classifier
-  context:
-    - claim_comparator_task

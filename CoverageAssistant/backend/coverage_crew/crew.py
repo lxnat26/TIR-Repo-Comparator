@@ -1,7 +1,6 @@
 from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task
 from crewai.agents.agent_builder.base_agent import BaseAgent
-from CoverageAssistant.backend.coverage_crew.tools.query_chromadb import QueryDBTool
 from typing import List
 
 
@@ -24,8 +23,6 @@ class CoverageCrew():
         return Agent(
             config=self.agents_config['claim_comparator'],
             verbose=True,
-            tools=[QueryDBTool()],
-            max_iter=3
         )
     
     @agent 
@@ -45,7 +42,6 @@ class CoverageCrew():
     def claim_comparator_task(self) -> Task:
         return Task(
             config=self.tasks_config['claim_comparator_task'],
-            tools=[QueryDBTool()]
         )
 
     @task
