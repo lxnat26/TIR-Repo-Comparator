@@ -1,9 +1,14 @@
+# api.py
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pathlib import Path
 import shutil
 import uuid
 from datetime import datetime
+from pypdf import PdfReader
+from pydantic import BaseModel
+from typing import Optional
+import io
 
 from SmartRepo.store_reports import ingest_pdf, collection
 
@@ -60,3 +65,31 @@ async def list_documents():
             }
 
     return list(seen.values())
+
+@app.post("/api/analyze/document")
+async def analyze_document(file: UploadFile = File(...)):
+    contents = await file.read()
+    reader = PdfReader(io.BytesIO(contents))
+    document_text = ""
+    for page in reader.pages:
+        document_text += page.extract_text() or ""
+    return {
+        "claim_count": 0,
+        "claims": [],
+        "analyzed_at": datetime.utcnow().isoformat(),
+        "document_text": document_text,
+    }
+
+class AnalyzeTextRequest(BaseModel):
+    text: str
+    competitor: Optional[str] = None
+    drug: Optional[str] = None
+
+@app.post("/api/analyze")
+async def analyze_text(req: AnalyzeTextRequest):
+    return {
+        "claim_count": 0,
+        "claims": [],
+        "analyzed_at": datetime.utcnow().isoformat(),
+        "document_text": req.text,
+    }

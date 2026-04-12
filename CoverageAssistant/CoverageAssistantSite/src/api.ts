@@ -132,3 +132,23 @@ export async function analyzeDocument(
 
   return res.json() as Promise<AnalysisResult>
 }
+
+export async function analyzeDraft(payload: {
+  text: string
+  metadata?: { competitor?: string; drug?: string }
+}): Promise<AnalysisResult> {
+  const res = await fetch(`${API_BASE}/api/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: payload.text,
+      competitor: payload.metadata?.competitor,
+      drug: payload.metadata?.drug,
+    }),
+  })
+  if (!res.ok) {
+    const msg = await res.text().catch(() => '')
+    throw new Error(msg || `Analysis failed (${res.status})`)
+  }
+  return res.json() as Promise<AnalysisResult>
+}
