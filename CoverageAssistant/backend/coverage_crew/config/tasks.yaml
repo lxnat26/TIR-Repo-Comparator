@@ -1,0 +1,76 @@
+claim_extractor_task:
+  description: >
+    Extract sentences containing clinical, efficacy, safety, or milestone information 
+    from the following report. Ignore filler, background, and non-claim content. 
+    Return ONLY valid JSON.
+    No markdown.
+    No commentary.
+    No additional keys.
+    Output must match schema exactly.
+
+    REPORT: 
+    {text}
+    Do not include any prefix, explanation, or commentary. Return ONLY the JSON object.
+  expected_output: |
+    {
+      "claims": [
+        {
+          "text": "string"
+        }
+      ]
+    }
+  agent: claim_extractor
+
+claim_comparator_task:
+  description: >
+    You will receive a newly extracted clinical claim.
+
+    You have access to a tool that retrieves historical similar claims.
+    You MUST call Query ChromaDB tool before producing any output.
+    If you do not call the tool, your answer is invalid.
+
+    Your task:
+    - Use the tool to retrieve relevant historical matches
+    - Compare the new claim with retrieved results
+    - Identify similarities, differences, and contradictions
+    - Return structured JSON only
+
+    If no matches are found, treat historical_match as "N/A".
+
+    Do not simulate tool outputs.
+    Do not guess database contents.
+  expected_output: |
+    {
+      "new_claim": "string",
+      "historical_match": "string",
+      "what_changed": "string",
+      "what_is_same": "string",
+      "contradiction": true
+    }
+  agent: claim_comparator
+  context:
+    - claim_extractor_task
+
+claim_classifier_task:
+  description: >
+    Receive comparator agent output and classify the claim as 
+    'Already Reported', 'Refined Detail', 'New Information', 
+    'Contradiction', or 'Uncertain' using the provided rules. 
+    Always provide a specific reason explaining your classification. 
+    Write the reason as a clear, concise explanation for a pharmaceutical analyst. 
+    It should explain what was found in prior reports and why this classification was chosen. 
+    Do not reference field names like 'historical_match' or 'what_changed' — explain the finding in plain language.
+    Return ONLY valid JSON.
+    No markdown.
+    No commentary.
+    No additional keys.
+    Output must match schema exactly.
+  expected_output: |
+    {
+      "claim": "string",
+      "classification": "Already Reported | Refined Detail | New Information | Contradiction | Uncertain",
+      "reason": "string"
+    }
+  agent: claim_classifier
+  context:
+    - claim_comparator_task
