@@ -109,9 +109,9 @@ function PanelLoading() {
   )
 }
 
-export function DraftEditor({ initialText = '' }: { initialText?: string }) {
+export function DraftEditor({ initialText = '', initialResult = null }: { initialText?: string, initialResult?: AnalysisResult | null }) {
   const [draftText, setDraftText] = useState(initialText)
-  const [result, setResult] = useState<AnalysisResult | null>(null)
+  const [result, setResult] = useState<AnalysisResult | null>(initialResult)
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -127,8 +127,14 @@ export function DraftEditor({ initialText = '' }: { initialText?: string }) {
     setError(null)
     setResult(null)
     try {
-      const res = await analyzeDocument(f)
-      setDraftText(res.document_text ?? '')
+      // Step 1: extract text
+      const extractRes = await analyzeDocument(f)
+      const text = extractRes.document_text ?? ''
+      setDraftText(text)
+
+      // Step 2: automatically run analysis
+      const analysisRes = await analyzeDraft({ text })
+      setResult(analysisRes)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Upload failed.')
     } finally {
