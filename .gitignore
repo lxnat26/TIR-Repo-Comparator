@@ -73,3 +73,10 @@ chroma_store/
 # Jupyter notebooks
 # =========================
 .ipynb_checkpoints/
+
+# =========================
+# Python build artifacts
+# =========================
+build/
+dist/
+*.egg-info/
