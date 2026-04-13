@@ -120,3 +120,24 @@ websocket-client==1.9.0
 websockets==16.0
 wrapt==2.1.2
 zipp==3.23.0
+
+# Core Logic
+langchain
+langchain-ollama
+langchain-chroma
+langchain-community
+langchain-core
+langchain-text-splitters
+
+# PDF & Image Processing
+unstructured[all-docs]
+pdf2image
+opencv-python
+pi-heif
+pillow
+
+# Backend & Tools
+fastapi
+uvicorn
+python-dotenv
+ollama
