@@ -18,4 +18,12 @@ If you already have a `venv`, activate it and run:
 - **/processed_reports**: Where the AI saves the "Smart Markdown" and cropped images.
 - **/pharma_db**: The local database folder. **Do not delete this** unless you want to re-index the documents.
 
-4. **Dependencies:** Ensure `Tesseract` and `Poppler` are installed on your system.
+### 4. System Dependencies (Non-Python)
+The `unstructured` library requires these to be installed on your system, not just in Python:
+- **Mac:** `brew install tesseract poppler`
+- **Windows:** Download the Tesseract and Poppler binaries and add them to your System PATH.
+
+## 🔒 Data Privacy & Security
+- All processing is performed **locally**. 
+- No data is sent to external APIs (OpenAI/Claude). 
+- PDF content is stored locally in the `/pharma_db` vector store.

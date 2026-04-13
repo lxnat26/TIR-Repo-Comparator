@@ -35,5 +35,20 @@ lerna-debug.log*
 # Vite specific cache
 .vite
 
+# Python bytecode (the "translations")
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
 # Local Python virtual environment (contains machine-specific binaries and libraries)
 venv/
+env/
+.venv/
+
+# Mac system files
+.DS_Store
+
+# Data Folders
+pharma_db/
+processed_reports/
