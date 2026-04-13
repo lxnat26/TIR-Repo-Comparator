@@ -9,6 +9,16 @@ You MUST have these two models downloaded locally to run the code:
 - `ollama pull nomic-embed-text` (For searching the documents)
 
 ### 2. Environment Update
+Virtual Environment
+Create it once:
+python3 -m venv venv
+
+Activate it (Crucial!):
+source venv/bin/activate
+
+Install the "Contract":
+pip install -r requirements.txt
+
 If you already have a `venv`, activate it and run:
 `pip install -r requirements.txt`
 *Note: If you see a 'chromadb' conflict, run: 
