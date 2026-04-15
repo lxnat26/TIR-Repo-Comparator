@@ -56,6 +56,7 @@ claim_classifier_task:
     For EACH object in the array, classify the claim as
     'Already Reported', 'Refined Detail', 'New Information',
     'Contradiction', or 'Uncertain' using the provided rules.
+    If historical_match is 'N/A', classification must be 'New Information'.
     Always provide a specific reason explaining your classification for each claim.
     Write the reason as a clear, concise explanation for a pharmaceutical analyst.
     It should explain what was found in prior reports and why this classification was chosen.
