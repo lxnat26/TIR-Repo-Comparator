@@ -38,14 +38,20 @@ def run():
     extraction_result = extraction_crew.kickoff(inputs={"text": report_text})
 
     claims_data = json.loads(extraction_result.raw)
-    claims = claims_data["claims"]
+    if isinstance(claims_data, list):
+        claims = claims_data
+    else:
+        claims = claims_data["claims"]
+
+    claims = [c for c in claims if c.get("claim_type") not in [None, ""]]
 
     tool = QueryDBTool()
     enriched_claims = []
     for claim in claims:
-        historical = tool._run(claim["text"])
+        historical = tool._run(claim["claim"])
         enriched_claims.append({
-            "claim_text": claim["text"],
+            "claim_type": claim["claim_type"],
+            "claim_text": claim["claim"],
             "historical_match": historical,
         })
 
