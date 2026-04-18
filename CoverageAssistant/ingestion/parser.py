@@ -3,27 +3,25 @@ from pathlib import Path
 from unstructured.partition.pdf import partition_pdf
 
 # 1. Setup the Folders
-# We need a place to put the "shredded" text and the "cropped" images
+# We need a place to put the "shredded" text
 # This finds the 'CoverageAssistant' root folder
 ROOT_DIR = Path(__file__).resolve().parents[2]
 OUTPUT_DIR = ROOT_DIR / "processed_reports"
-IMAGE_DIR = OUTPUT_DIR / "images"
 
-# Ensure directories exist
-IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+# Ensure directory exists
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def run_smart_parser(pdf_path):
-    print(f"--- 🚀 Starting Smart Parse on: {pdf_path} ---")
+    print(f"--- Starting Smart Parse on: {pdf_path} ---")
 
     # 2. The "Shredder" (partition_pdf)
     # This is the heavy lifter. It 'looks' at the PDF layout.
     elements = partition_pdf(
         filename=pdf_path,
-        strategy="hi_res",           # 'hi_res' is required to find images/tables
-        extract_images_in_pdf=True,  # This tells the code to "crop" charts
-        extract_image_block_output_dir=IMAGE_DIR, # Where to save those crops
-        infer_table_structure=True,  # Tries to turn tables into text
-        chunking_strategy="by_title",# Groups text by headers (e.g. 'Results')
+        strategy="fast",              # 'fast' is best if the PDF is text-based (not a scan)
+        extract_images_in_pdf=False,  # DO NOT crop images
+        infer_table_structure=True,   # Still keeps tables as text
+        chunking_strategy="by_title", # Keeps the context grouped by headers
         max_characters=4000,
         new_after_n_chars=3800,
     )
@@ -37,7 +35,7 @@ def run_smart_parser(pdf_path):
             # We add double newlines to keep the AI from getting confused
             f.write(str(element) + "\n\n")
 
-    print(f"--- ✅ Done! Check the '{OUTPUT_DIR}' folder for results. ---")
+    print(f"--- Done! Check the '{OUTPUT_DIR}' folder for results. ---")
 
 # --- MAIN EXECUTION ---
 # This looks for any PDF in your current folder and runs the code
@@ -48,4 +46,4 @@ if __name__ == "__main__":
     if target_pdf.exists():
         run_smart_parser(target_pdf)
     else:
-        print(f"❌ Error: Could not find '{target_pdf}'")
+        print(f"Error: Could not find '{target_pdf}'")

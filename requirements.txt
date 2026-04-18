@@ -18,11 +18,8 @@ chromadb
 unstructured[all-docs]
 pypdf
 pdf2image
+pathlib
 
-# --- Image Processing ---
-opencv-python
-pillow
-pi-heif
 
 # --- Data / Utilities ---
 numpy
