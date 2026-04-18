@@ -4,7 +4,8 @@ This project uses AI to parse pharmaceutical reports, extracting both text and i
 
 ## Setup Instructions
 ### 1. Model Requirements (Ollama)
-You MUST have these two models downloaded locally to run the code:
+You MUST have these models downloaded locally to run the code:
+- `ollama pull llama3.2` (For dynamic metadata extraction)
 - `ollama pull llama3.2-vision` (For reading charts/images)
 - `ollama pull nomic-embed-text` (For searching the documents)
 
@@ -13,14 +14,14 @@ Virtual Environment
 Create it once:
 python3 -m venv venv
 
-Activate it (Crucial!):
-source venv/bin/activate
+**Activate your virtual environment:**
+* **Mac/Linux:** `source venv/bin/activate`
+* **Windows:** `.\venv\Scripts\activate`
 
-Install the "Contract":
+**Install/Update dependencies:**
+```bash
 pip install -r requirements.txt
 
-If you already have a `venv`, activate it and run:
-`pip install -r requirements.txt`
 *Note: If you see a 'chromadb' conflict, run: 
 `pip install "chromadb~=1.1.0"`*
 
