@@ -1,6 +1,7 @@
 from pathlib import Path
 from datetime import datetime
 import hashlib
+import re
 import chromadb
 from chromadb.config import Settings
 from pypdf import PdfReader
@@ -18,6 +19,55 @@ def make_doc_id(file_bytes, filename):
     digest = hashlib.sha256(file_bytes).hexdigest()[:16]
     safe_name = Path(filename).stem.replace(" ", "_")
     return f"{safe_name}_{digest}"
+
+
+def extract_field(text: str, field: str) -> str:
+    """
+    Extract a named field from report header text that looks like:
+      'Company:  Eli  Lilly'
+      'Drug:\n \nLebrikizumab\n \n(Ebglyss)'
+    Returns the raw value (may contain extra whitespace — caller should normalize).
+    Returns empty string if not found.
+    """
+    pattern = re.compile(
+        rf'{re.escape(field)}:\s*([\w()\-\/\s]+?)(?=\n\s*\n|\n\s*[A-Z][a-z]+:|\Z)',
+        re.IGNORECASE | re.DOTALL
+    )
+    match = pattern.search(text)
+    if match:
+        return re.sub(r'\s+', ' ', match.group(1)).strip()
+    return ""
+
+
+def extract_report_date_ts(text: str) -> int:
+    """
+    Parse the publication date written inside the report text and return it
+    as a Unix timestamp (int) so ChromaDB's $gte/$lte operators can filter it.
+
+    Handles PDF-extracted text with extra whitespace/newlines between tokens,
+    e.g. 'Date:\n \nSeptember\n \n21,\n \n2024'.
+
+    Looks for patterns like:
+      'Date: September 21, 2024'
+      'Date: July 10, 2025'
+      'Date: March 2024'
+    Falls back to the current time if no date is found.
+    """
+    formats = ["%B %d %Y", "%B %Y"]
+    # \s+ handles newlines and multiple spaces between PDF-extracted tokens
+    match = re.search(
+        r'Date:\s*([A-Za-z]+\s+\d{1,2},?\s+\d{4}|[A-Za-z]+\s+\d{4})',
+        text
+    )
+    if match:
+        # Collapse all internal whitespace and strip commas
+        raw = re.sub(r'\s+', ' ', match.group(1)).replace(",", "").strip()
+        for fmt in formats:
+            try:
+                return int(datetime.strptime(raw, fmt).timestamp())
+            except ValueError:
+                continue
+    return int(datetime.utcnow().timestamp())
 
 
 def extract_pdf_text(file_path):
@@ -66,6 +116,16 @@ def ingest_pdf(file_path):
 
     timestamp = datetime.utcnow().isoformat()
 
+    # Extract metadata from the first page text.
+    # report_date_ts is stored as a Unix timestamp int so ChromaDB's $gte
+    # operator can filter by report date (not upload date).
+    # company_name and drug_name are stored for source-keyword filtering
+    # in QueryDBTool, eliminating the need for a separate pharma_db store.
+    first_page_text = pages[0][1] if pages else ""
+    report_date_ts = extract_report_date_ts(first_page_text)
+    company_name = extract_field(first_page_text, "Company")
+    drug_name = extract_field(first_page_text, "Drug")
+
     chunk_index = 0
 
     for page_num, page_text in pages:
@@ -86,6 +146,9 @@ def ingest_pdf(file_path):
                 "page": page_num,
                 "chunk_index": chunk_index,
                 "uploaded_at": timestamp,
+                "report_date_ts": report_date_ts,
+                "company_name": company_name,
+                "drug_name": drug_name,
                 "file_type": "pdf"
 
             })

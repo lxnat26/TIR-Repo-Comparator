@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -6,6 +7,7 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 from crewai import Crew, Process
+import chromadb
 
 # Add the root to sys.path to find the 'ingestion' package
 if str(REPO_ROOT) not in sys.path:
@@ -13,11 +15,9 @@ if str(REPO_ROOT) not in sys.path:
 
 try:
     from CoverageAssistant.ingestion import data_main
-    from CoverageAssistant.ingestion.vector_store import extract_metadata_with_ai
 except ImportError:
     sys.path.append(str(REPO_ROOT / "CoverageAssistant" / "ingestion"))
     import data_main
-    from vector_store import extract_metadata_with_ai
 
 try:
     from .crew import CoverageCrew
@@ -27,6 +27,33 @@ except ImportError:
     from CoverageAssistant.backend.coverage_crew.tools.query_chromadb import QueryDBTool
 
     from crew import CoverageCrew
+
+
+PHARMA_DB_PATH = str(REPO_ROOT / "pharma_db")
+
+
+def _read_metadata_from_pharma_db() -> dict:
+    """
+    Read drug_name and company_name from pharma_db/pharma_reports — the single
+    store written by the teammate's ingestion pipeline (vector_store.py).
+    This avoids re-calling the LLM and is deterministic.
+    Strips parenthetical brand names: 'Lebrikizumab (Ebglyss)' → 'Lebrikizumab'.
+    """
+    try:
+        client = chromadb.PersistentClient(path=PHARMA_DB_PATH)
+        col = client.get_collection("pharma_reports")
+        result = col.get(limit=1, include=["metadatas"])
+        if result["metadatas"]:
+            meta = result["metadatas"][0]
+            drug_raw = meta.get("drug_name") or ""
+            company = meta.get("company_name") or ""
+            # Strip parenthetical brand names: "Lebrikizumab (Ebglyss)" → "Lebrikizumab"
+            drug = re.sub(r'\s*\([^)]+\)', '', drug_raw).strip()
+            return {"drug_name": drug or None, "company_name": company or None}
+    except Exception as e:
+        print(f"   ⚠️  Could not read pharma_db metadata: {e}")
+    return {"drug_name": None, "company_name": None}
+
 
 def run():
     """
@@ -49,10 +76,10 @@ def run():
     with report_path.open("r", encoding="utf-8") as f:
         report_text = f.read()
 
-    print("\n🔍 Extracting report metadata...")
-    metadata = extract_metadata_with_ai(report_text)
-    drug_name = metadata.get("drug_name") or None
-    company_name = metadata.get("company_name") or None
+    print("\n🔍 Reading report metadata from pharma_db...")
+    metadata = _read_metadata_from_pharma_db()
+    drug_name = metadata.get("drug_name")
+    company_name = metadata.get("company_name")
     print(f"   drug_name   : {drug_name}")
     print(f"   company_name: {company_name}")
 
