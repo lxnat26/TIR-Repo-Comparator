@@ -7,7 +7,8 @@ from pathlib import Path
 
 # Path to the test ChromaDB directory
 repo_root = Path(__file__).resolve().parents[4]
-CHROMA_PATH = str(repo_root / "tests" / "test_chroma_store")
+#CHROMA_PATH = str(repo_root / "tests" / "test_chroma_store")
+CHROMA_PATH = str(repo_root / "SmartRepo" / "chroma_store")
 
 class QueryDBToolInput(BaseModel):
     """Input schema for QueryDBTool."""
