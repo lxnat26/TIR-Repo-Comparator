@@ -6,16 +6,27 @@ claim_extractor_task:
     No markdown.
     No commentary.
     No additional keys.
-    Output must match schema exactly.
+    Output must match schema exactly. 
+
+    Claim type definitions:
+    - 'milestone': trial phase initiation or completion, FDA submission, FDA approval, drug approval, data release, enrollment updates, regulatory decisions, marketing authorization
+    - 'efficacy': how well the drug works — response rates, clinical improvement scores, endpoint results, comparative effectiveness data
+    - 'safety': side effects, tolerability, adverse events, grade events, discontinuation rates due to adverse effects
+  
+    'claim_type' MUST be 'milestone', 'efficacy', 'safety'
+    If a sentence cannot be clearly classified as 'milestone', 'efficacy', or 'safety', 
+    do not include it in the output.
 
     REPORT: 
     {text}
+    
     Do not include any prefix, explanation, or commentary. Return ONLY the JSON object.
   expected_output: |
     {
       "claims": [
         {
-          "text": "string"
+          "claim_type": "milestone | efficacy | safety"
+          "claim": "string",
         }
       ]
     }
@@ -30,7 +41,7 @@ claim_comparator_task:
     {enriched_claims}
 
     For EACH item in the list:
-    - Use "claim_text" as the new_claim value
+    - Use "claim_text" as the claim value
     - Use "historical_match" as the historical_match value
     - Determine what_changed, what_is_same, and whether there is a contradiction
     - If "historical_match" is "No historical matches found", set all comparison
@@ -41,7 +52,8 @@ claim_comparator_task:
   expected_output: |
     [
       {
-        "new_claim": "string",
+        "claim_type": "milestone | efficacy | safety",
+        "claim": "string - the new claim text",
         "historical_match": "string",
         "what_changed": "string",
         "what_is_same": "string",
@@ -52,12 +64,29 @@ claim_comparator_task:
 
 claim_classifier_task:
   description: >
+    IMPORTANT: Only reference facts explicitly present in the claim text 
+    and historical match text. Do not infer or introduce phase numbers, 
+    percentages, or clinical details not stated in the provided text.
     Receive the comparator agent output, which is a JSON ARRAY of comparison objects.
     For EACH object in the array, classify the claim as
     'Already Reported', 'Refined Detail', 'New Information',
     'Contradiction', or 'Uncertain' using the provided rules.
     If historical_match is 'N/A', classification must be 'New Information'.
     Always provide a specific reason explaining your classification for each claim.
+    When writing the reason:
+     - For milestone claims: always describe the development stage explicitly. 
+    State what stage was previously reported and what stage is now being reported.
+    Example: 'Previously reported as Phase II initiation. Now reporting Phase III 
+    progression for lebrikizumab in atopic dermatitis.'
+     - For efficacy claims: describe what metric or outcome changed or stayed the same.
+    Example: 'Efficacy results for lebrikizumab remain consistent with prior reports 
+    showing improvements in eczema severity scores.'
+    - For safety claims: describe what safety signal was reported and whether it is 
+    new or consistent with prior reports.
+    Example: 'Safety profile remains favorable, consistent with previously reported 
+    tolerability data.'
+    - Always write as if explaining to an analyst who needs to quickly understand 
+    whether action is needed.
     Write the reason as a clear, concise explanation for a pharmaceutical analyst.
     It should explain what was found in prior reports and why this classification was chosen.
     Do not reference field names like 'historical_match' or 'what_changed' — explain the finding in plain language.
@@ -67,9 +96,11 @@ claim_classifier_task:
   expected_output: |
     [
       {
-        "claim": "string",
+        "claim_type": "milestone | efficacy | safety - copy from extractor output",
+        "claim": "string - copy the exact claim text from comparator input",
+        "historical_claim": "string - exact historical match text",
         "classification": "Already Reported | Refined Detail | New Information | Contradiction | Uncertain",
-        "reason": "string"
+        "reason": "string - plain language explanation for analyst"
       }
     ]
   agent: claim_classifier
