@@ -1,13 +1,14 @@
 import re
-import chromadb
 from typing import Type, Optional
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
 from pathlib import Path
-from datetime import datetime, timedelta
+from langchain_chroma import Chroma
+from langchain_ollama import OllamaEmbeddings
 
 repo_root = Path(__file__).resolve().parents[4]
-CHROMA_PATH = str(repo_root / "SmartRepo" / "chroma_store")
+PHARMA_DB_PATH = str(repo_root / "pharma_db")
+COLLECTION_NAME = "pharma_reports"
 
 _STOP_WORDS = {
     "a", "an", "the", "in", "of", "to", "and", "or", "is", "was", "were",
@@ -15,15 +16,14 @@ _STOP_WORDS = {
     "are", "be", "been", "has", "have", "had", "not", "but", "its", "their",
 }
 
-
 _BULLET_PATTERN = re.compile(r'[\u25cf\u25cb\u2022\u2013\u2014●•–—]\s*')
 
 
 class QueryDBToolInput(BaseModel):
     """Input schema for QueryDBTool."""
     claim_text: str = Field(..., description="The claim text to search for similar historical claims in ChromaDB")
-    drug_name: Optional[str] = Field(None, description="Drug name keyword to filter by matching source filenames (e.g. 'Lebrikizumab')")
-    company_name: Optional[str] = Field(None, description="Company name keyword to filter by matching source filenames (e.g. 'Eli Lilly')")
+    drug_name: Optional[str] = Field(None, description="Drug name keyword to filter results (e.g. 'Lebrikizumab')")
+    company_name: Optional[str] = Field(None, description="Company name keyword to filter results (e.g. 'Eli Lilly')")
 
 
 class QueryDBTool(BaseTool):
@@ -37,11 +37,24 @@ class QueryDBTool(BaseTool):
 
     @staticmethod
     def _keywords(name: str) -> list:
-
+        """
+        Split a name into individual lowercase keywords longer than 3 chars.
+        Handles multi-word names like 'Eli Lilly' → ['lilly']
+        or 'Lebrikizumab' → ['lebrikizumab'].
+        """
         return [w.lower() for w in name.split() if len(w) > 3]
 
     def _extract_best_sentence(self, chunk: str, claim: str) -> str:
+        """
+        Return the single sentence from a raw chunk that best matches the claim.
 
+        Strategy:
+        1. Strip bullet characters and collapse whitespace from PDF-extracted text.
+        2. Try exact containment — if a sentence contains the claim verbatim
+           (or vice versa), return it immediately.
+        3. Fall back to the sentence with the highest content-word overlap
+           with the claim.
+        """
         flat = _BULLET_PATTERN.sub('', chunk)
         flat = re.sub(r'\s+', ' ', flat).strip()
 
@@ -78,56 +91,66 @@ class QueryDBTool(BaseTool):
             print(f"  company: {company_name}")
 
         try:
-            client = chromadb.PersistentClient(path=CHROMA_PATH)
-            collection = client.get_collection("reports")
+            # Use the same embedding model as the ingestion pipeline so
+            # query vectors are in the same space as stored vectors.
+            embeddings = OllamaEmbeddings(model="nomic-embed-text")
+            vector_store = Chroma(
+                collection_name=COLLECTION_NAME,
+                persist_directory=PHARMA_DB_PATH,
+                embedding_function=embeddings,
+            )
 
-            source_condition = None
+            # Build keyword list from drug/company names.
             drug_keywords = self._keywords(drug_name) if drug_name else []
             company_keywords = self._keywords(company_name) if company_name else []
             all_keywords = drug_keywords + company_keywords
 
+            chroma_filter = None
             if all_keywords:
-                all_meta = collection.get(include=["metadatas"])
-                matching_sources = list(dict.fromkeys(
-                    m["source"]
-                    for m in all_meta["metadatas"]
-                    if m.get("source")
-                    and any(kw in m["source"].lower() for kw in all_keywords)
-                ))
-                if matching_sources:
-                    source_condition = {"source": {"$in": matching_sources}}
-                    print(f"  matched sources: {matching_sources}")
+                raw = vector_store._collection.get(include=["metadatas"])
+                matched_companies = set()
+                matched_drugs = set()
+                for meta in raw["metadatas"]:
+                    company_val = (meta.get("company_name") or "").lower()
+                    drug_val = (meta.get("drug_name") or "").lower()
+                    for kw in all_keywords:
+                        if kw in company_val:
+                            matched_companies.add(meta["company_name"])
+                        if kw in drug_val:
+                            matched_drugs.add(meta["drug_name"])
+
+                conditions = []
+                if matched_companies:
+                    if len(matched_companies) == 1:
+                        conditions.append({"company_name": {"$eq": next(iter(matched_companies))}})
+                    else:
+                        conditions.append({"company_name": {"$in": list(matched_companies)}})
+                if matched_drugs:
+                    if len(matched_drugs) == 1:
+                        conditions.append({"drug_name": {"$eq": next(iter(matched_drugs))}})
+                    else:
+                        conditions.append({"drug_name": {"$in": list(matched_drugs)}})
+
+                if conditions:
+                    chroma_filter = {"$or": conditions} if len(conditions) > 1 else conditions[0]
+                    print(f"  metadata filter: {chroma_filter}")
                 else:
-                    print("  no sources matched drug/company keywords; using full collection")
+                    print("  no metadata matched drug/company keywords; using full collection")
+            docs = []
+            attempts = [chroma_filter, None] if chroma_filter else [None]
 
-            cutoff_ts = int((datetime.utcnow() - timedelta(days=30)).timestamp())
-            date_condition = {"report_date_ts": {"$gte": cutoff_ts}}
-
-            where_attempts = []
-            if source_condition:
-                where_attempts.append({"$and": [date_condition, source_condition]})
-                where_attempts.append(source_condition)
-            else:
-                where_attempts.append(date_condition)
-            where_attempts.append(None)
-
-            results = None
-            for where in where_attempts:
-                try:
-                    query_kwargs = {"query_texts": [claim_text], "n_results": 3}
-                    if where is not None:
-                        query_kwargs["where"] = where
-                    results = collection.query(**query_kwargs)
-                    label = "no filter" if where is None else str(where)
-                    print(f"  query succeeded with: {label}")
+            for attempt_filter in attempts:
+                label = str(attempt_filter) if attempt_filter else "no filter"
+                results = vector_store.similarity_search(
+                    claim_text, k=3, filter=attempt_filter
+                )
+                if results:
+                    print(f"  query returned {len(results)} results with: {label}")
+                    docs = [doc.page_content for doc in results]
                     break
-                except Exception as e:
-                    print(f"  filter failed ({e}); trying next fallback")
+                else:
+                    print(f"  query empty with: {label}; trying next fallback")
 
-            if results is None:
-                return "No historical matches found"
-
-            docs = results["documents"][0] if results["documents"] else []
             if not docs:
                 return "No historical matches found"
 
