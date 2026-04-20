@@ -2,10 +2,7 @@ import json
 from pathlib import Path
 import sys
 
-# Path(__file__) is CoverageAssistant/backend/main.py
-# parents[0] = backend
-# parents[1] = CoverageAssistant
-# parents[2] = TIR-REPO-COMPARATOR (Root)
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 from crewai import Crew, Process
@@ -16,12 +13,12 @@ if str(REPO_ROOT) not in sys.path:
 
 try:
     from CoverageAssistant.ingestion import data_main
+    from CoverageAssistant.ingestion.vector_store import extract_metadata_with_ai
 except ImportError:
-    # Manual fallback for ingestion module
     sys.path.append(str(REPO_ROOT / "CoverageAssistant" / "ingestion"))
     import data_main
+    from vector_store import extract_metadata_with_ai
 
-# Import Crew (assuming crew.py is in the same 'backend' folder)
 try:
     from .crew import CoverageCrew
     from .tools.query_chromadb import QueryDBTool
@@ -29,7 +26,6 @@ except ImportError:
     from CoverageAssistant.backend.coverage_crew.crew import CoverageCrew
     from CoverageAssistant.backend.coverage_crew.tools.query_chromadb import QueryDBTool
 
-    # Fallback if running as a standalone script
     from crew import CoverageCrew
 
 def run():
@@ -41,19 +37,24 @@ def run():
     """
     target_pdf = "2024_lilly_lebrikizumab_phase2_update.pdf"
 
-    # 1. TRIGGER THE DATA ORCHESTRATOR
     success = data_main.run_ingestion_pipeline(target_pdf)
-    
+
     if not success:
         print("🛑 Pipeline failed. Aborting Crew execution.")
         return
 
-    # 2. PROCEED TO CREW EXECUTION
     print("\n🤖 Starting Agentic Analysis...")
     report_path = REPO_ROOT / "processed_reports" / "final_report2.md"
 
     with report_path.open("r", encoding="utf-8") as f:
         report_text = f.read()
+
+    print("\n🔍 Extracting report metadata...")
+    metadata = extract_metadata_with_ai(report_text)
+    drug_name = metadata.get("drug_name") or None
+    company_name = metadata.get("company_name") or None
+    print(f"   drug_name   : {drug_name}")
+    print(f"   company_name: {company_name}")
 
     cc = CoverageCrew()
 
@@ -76,7 +77,11 @@ def run():
     tool = QueryDBTool()
     enriched_claims = []
     for claim in claims:
-        historical = tool._run(claim["claim"])
+        historical = tool._run(
+            claim["claim"],
+            drug_name=drug_name,
+            company_name=company_name,
+        )
         enriched_claims.append({
             "claim_type": claim["claim_type"],
             "claim_text": claim["claim"],
@@ -98,6 +103,7 @@ def run():
 
     print("\n\n=== FINAL OUTPUT ===\n\n")
     print(result.raw)
+
 
 if __name__ == "__main__":
     run()
