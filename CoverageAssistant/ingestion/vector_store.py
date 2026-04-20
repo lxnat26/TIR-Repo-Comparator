@@ -14,7 +14,14 @@ def extract_metadata_with_ai(file_content):
     snippet = file_content[:1500]
     
     prompt = f"""
-    Extract clinical report metadata from the text below into a JSON object.
+    You are a data extraction bot. Extract clinical report metadata into a JSON object.
+    
+    STRICT RULES:
+    1. Output ONLY valid JSON.
+    2. The "report_date" MUST be in YYYY-MM-DD format (e.g., 2024-09-21). 
+    3. If a date is "September 21, 2024", convert it to "2024-09-21".
+    4. If any field is missing, use "Unknown".
+
     Required keys: "company_name", "drug_name", "report_date".
     
     Text:
