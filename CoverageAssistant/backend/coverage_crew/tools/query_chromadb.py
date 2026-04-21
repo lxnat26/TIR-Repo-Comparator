@@ -10,12 +10,6 @@ repo_root = Path(__file__).resolve().parents[4]
 PHARMA_DB_PATH = str(repo_root / "pharma_db")
 COLLECTION_NAME = "pharma_reports"
 
-_STOP_WORDS = {
-    "a", "an", "the", "in", "of", "to", "and", "or", "is", "was", "were",
-    "for", "with", "that", "this", "it", "as", "at", "by", "from", "on",
-    "are", "be", "been", "has", "have", "had", "not", "but", "its", "their",
-}
-
 _BULLET_PATTERN = re.compile(r'[\u25cf\u25cb\u2022\u2013\u2014●•–—]\s*')
 
 
@@ -47,13 +41,6 @@ class QueryDBTool(BaseTool):
     def _extract_best_sentence(self, chunk: str, claim: str) -> str:
         """
         Return the single sentence from a raw chunk that best matches the claim.
-
-        Strategy:
-        1. Strip bullet characters and collapse whitespace from PDF-extracted text.
-        2. Try exact containment — if a sentence contains the claim verbatim
-           (or vice versa), return it immediately.
-        3. Fall back to the sentence with the highest content-word overlap
-           with the claim.
         """
         flat = _BULLET_PATTERN.sub('', chunk)
         flat = re.sub(r'\s+', ' ', flat).strip()
@@ -71,10 +58,10 @@ class QueryDBTool(BaseTool):
             if claim_lower in s_lower or s_lower in claim_lower:
                 return sentence
 
-        claim_words = set(claim_lower.split()) - _STOP_WORDS
+        claim_words = set(claim_lower.split())
         best = max(
             sentences,
-            key=lambda s: len(claim_words & (set(s.lower().split()) - _STOP_WORDS))
+            key=lambda s: len(claim_words & set(s.lower().split()))
         )
         return best
 
