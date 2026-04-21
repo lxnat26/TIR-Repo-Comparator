@@ -91,8 +91,7 @@ class QueryDBTool(BaseTool):
             print(f"  company: {company_name}")
 
         try:
-            # Use the same embedding model as the ingestion pipeline so
-            # query vectors are in the same space as stored vectors.
+
             embeddings = OllamaEmbeddings(model="nomic-embed-text")
             vector_store = Chroma(
                 collection_name=COLLECTION_NAME,
@@ -100,7 +99,6 @@ class QueryDBTool(BaseTool):
                 embedding_function=embeddings,
             )
 
-            # Build keyword list from drug/company names.
             drug_keywords = self._keywords(drug_name) if drug_name else []
             company_keywords = self._keywords(company_name) if company_name else []
             all_keywords = drug_keywords + company_keywords
