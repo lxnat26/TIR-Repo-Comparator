@@ -40,6 +40,44 @@ _VALID_CLAIM_TYPES = {"milestone", "efficacy", "safety"}
 _VALID_CLASSIFICATIONS = {"Already Reported", "Refined Detail", "New Information"}
 
 
+def _parse_model_json(raw_text: str):
+    """Parse JSON from model output that may include code fences, preamble text,
+    or unescaped control characters."""
+    text = (raw_text or "").strip()
+    if not text:
+        raise ValueError("Model output was empty")
+
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    try:
+        return json.loads(text, strict=False)
+    except json.JSONDecodeError:
+        pass
+
+    decoder = json.JSONDecoder(strict=False)
+    for token in ("{", "["):
+        start = text.find(token)
+        while start != -1:
+            try:
+                parsed, _ = decoder.raw_decode(text, start)
+                return parsed
+            except json.JSONDecodeError:
+                start = text.find(token, start + 1)
+
+    raise ValueError(f"Could not parse JSON from model output: {text[:200]}")
+
+
 def _sanitize_for_ui(s):
     """Post-LLM cleaner for claim/historical_claim/reason fields.
     Converts markdown text into plain UI-ready prose: strips bullets, bold/italic
@@ -139,7 +177,7 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
     )
     extraction_result = extraction_crew.kickoff(inputs={"text": report_text})
 
-    claims_data = json.loads(extraction_result.raw)
+    claims_data = _parse_model_json(extraction_result.raw)
     claims = claims_data if isinstance(claims_data, list) else claims_data.get("claims", [])
     claims = [c for c in claims if c.get("claim_type") not in [None, ""]]
 
@@ -171,7 +209,7 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
 
     # Step 4: Parse and remap to frontend shape
     try:
-        final = json.loads(result.raw)
+        final = _parse_model_json(result.raw)
         raw_claims = final if isinstance(final, list) else final.get("claims", [])
     except Exception:
         return {"claims": [], "raw_output": result.raw}
