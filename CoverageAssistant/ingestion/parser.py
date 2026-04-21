@@ -2,44 +2,58 @@ import os
 from pathlib import Path
 from unstructured.partition.pdf import partition_pdf
 
-# 1. Setup the Folders
-# We need a place to put the "shredded" text
-# This finds the 'CoverageAssistant' root folder
 ROOT_DIR = Path(__file__).resolve().parents[2]
-INPUT_DIR = ROOT_DIR / "SmartRepo"/ "docs"
+INPUT_DIR = ROOT_DIR / "SmartRepo" / "docs"
 OUTPUT_DIR = ROOT_DIR / "processed_reports"
 
-# Ensure directory exists
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def clean_markdown(content: str) -> str:
+    """Remove chart labels, axis text, and other short garbage lines."""
+    clean_lines = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        words = [w for w in stripped.split() if w.isalpha() and len(w) > 2]
+        if len(stripped) >= 40 and len(words) >= 5:
+            clean_lines.append(line)
+    return "\n".join(clean_lines)
+
 
 def run_smart_parser(pdf_path):
     print(f"--- Starting Smart Parse on: {pdf_path} ---")
 
-    # 2. The "Shredder" (partition_pdf)
-    # This is the heavy lifter. It 'looks' at the PDF layout.
     elements = partition_pdf(
         filename=pdf_path,
-        strategy="fast",              # 'fast' is best if the PDF is text-based (not a scan)
-        extract_images_in_pdf=False,  # DO NOT crop images
-        infer_table_structure=True,   # Still keeps tables as text
-        chunking_strategy="by_title", # Keeps the context grouped by headers
+        strategy="auto",
+        extract_images_in_pdf=False,
+        infer_table_structure=True,
+        chunking_strategy="by_title",
         max_characters=4000,
         new_after_n_chars=3800,
     )
 
-    # 3. Create the "Smart" Markdown File
-    # We turn the 'elements' into a clean .md file for the AI to read later
     md_output_path = OUTPUT_DIR / f"{pdf_path.stem}.md"
-    
+
+    # Write raw output
     with md_output_path.open("w", encoding="utf-8") as f:
         for element in elements:
-            # We add double newlines to keep the AI from getting confused
             f.write(str(element) + "\n\n")
+
+    # Clean up chart/image artifacts
+    with md_output_path.open("r", encoding="utf-8") as f:
+        content = f.read()
+
+    cleaned = clean_markdown(content)
+
+    with md_output_path.open("w", encoding="utf-8") as f:
+        f.write(cleaned)
 
     print(f" Saved → {md_output_path.name}")
 
-# --- MAIN EXECUTION ---
-# This looks for any PDF in your current folder and runs the code
+
 if __name__ == "__main__":
     pdf_files = list(INPUT_DIR.glob("*.pdf"))
 

@@ -25,8 +25,8 @@ claim_extractor_task:
     {
       "claims": [
         {
-          "claim_type": "milestone | efficacy | safety"
-          "claim": "string",
+          "claim_type": "milestone | efficacy | safety",
+          "claim": "string"
         }
       ]
     }
@@ -41,7 +41,7 @@ claim_comparator_task:
     {enriched_claims}
 
     For EACH item in the list:
-    - Use "claim_text" as the claim value
+    - The output key for the claim text MUST be "claim" (not "claim_txt" or any other variation)
     - Use "historical_match" as the historical_match value
     - Determine what_changed, what_is_same, and whether there is a contradiction
     - If "historical_match" is "No historical matches found", set all comparison
@@ -68,10 +68,17 @@ claim_classifier_task:
     and historical match text. Do not infer or introduce phase numbers, 
     percentages, or clinical details not stated in the provided text.
     Receive the comparator agent output, which is a JSON ARRAY of comparison objects.
-    For EACH object in the array, classify the claim as
-    'Already Reported', 'Refined Detail', 'New Information',
-    'Contradiction', or 'Uncertain' using the provided rules.
-    If historical_match is 'N/A', classification must be 'New Information'.
+    For EACH object in the array, classify the claim using these rules:
+
+    Classification rules:
+    - 'Already Reported': claim and historical match describe the exact same finding with no new details — analyst can copy previous text directly
+    - 'Refined Detail': claim describes the same topic as the historical match but with changed or additional specifics — same drug/trial but different numbers, updated phase, or added context. Analyst needs to revise previous text.
+    - 'New Information': historical_match is "No historical matches found" OR the claim describes a completely different topic with no overlap to the historical match — analyst must write this from scratch
+
+    IMPORTANT: If historical_match is "No historical matches found", classification MUST be 'New Information'.
+    IMPORTANT: 'Refined Detail' requires a meaningful historical match on the SAME topic. If the historical match is about a different subject entirely, use 'New Information' instead.
+    IMPORTANT: Do NOT use 'Contradiction' or 'Uncertain' — every claim must be 'Already Reported', 'Refined Detail', or 'New Information'.
+
     Always provide a specific reason explaining your classification for each claim.
     When writing the reason:
      - For milestone claims: always describe the development stage explicitly. 
@@ -96,10 +103,10 @@ claim_classifier_task:
   expected_output: |
     [
       {
-        "claim_type": "milestone | efficacy | safety - copy from extractor output",
+        "claim_type": "milestone | efficacy | safety",
         "claim": "string - copy the exact claim text from comparator input",
         "historical_claim": "string - exact historical match text",
-        "classification": "Already Reported | Refined Detail | New Information | Contradiction | Uncertain",
+        "classification": "Already Reported | Refined Detail | New Information",
         "reason": "string - plain language explanation for analyst"
       }
     ]

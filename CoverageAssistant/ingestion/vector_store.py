@@ -1,91 +1,90 @@
-import os
-import re
-import json
+import hashlib
 from pathlib import Path
-from langchain_ollama import OllamaEmbeddings, ChatOllama
-from langchain_chroma import Chroma
-from langchain_text_splitters import MarkdownHeaderTextSplitter
+from datetime import datetime
+import chromadb
+from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 
-embeddings = OllamaEmbeddings(model="nomic-embed-text")
-llm = ChatOllama(model="llama3.2", format="json", temperature=0) # Use a small, fast model
+ROOT_DIR = Path(__file__).resolve().parents[2]
+PROCESSED_DIR = ROOT_DIR / "processed_reports"
+DB_PATH = str(ROOT_DIR / "pharma_db")
+COLLECTION_NAME = "pharma_reports"
 
-def extract_metadata_with_ai(file_content):
-    # Clinical reports usually put the metadata on the first page
-    snippet = file_content[:1500]
-    
-    prompt = f"""
-    You are a data extraction bot. Extract clinical report metadata into a JSON object.
-    
-    STRICT RULES:
-    1. Output ONLY valid JSON.
-    2. The "report_date" MUST be in YYYY-MM-DD format (e.g., 2024-09-21). 
-    3. If a date is "September 21, 2024", convert it to "2024-09-21".
-    4. If any field is missing, use "Unknown".
+embedding_fn = OllamaEmbeddingFunction(
+    model_name="nomic-embed-text",
+    url="http://localhost:11434/api/embeddings",
+)
 
-    Required keys: "company_name", "drug_name", "report_date".
-    
-    Text:
-    {snippet}
-    """
-    
-    try:
-        response = llm.invoke(prompt)
-        content = response.content.strip()
 
-        # Handle Markdown code blocks if the AI included them
-        if "```" in content:
-            content = content.split("```")[1]
-            if content.startswith("json"):
-                content = content[4:]
-        
-        return json.loads(content.strip())
-
-    except Exception as e:
-        # If it fails, print the actual AI response so you can see what went wrong
-        print(f"⚠️ AI Response was: {response.content if 'response' in locals() else 'No response'}")
-        print(f"⚠️ Error parsing JSON: {e}")
-        return {"company_name": "Unknown", "drug_name": "Unknown", "report_date": "Unknown"}
+def chunk_text(text, chunk_size=1000, overlap=100):
+    chunks = []
+    start = 0
+    while start < len(text):
+        chunk = text[start:start + chunk_size].strip()
+        if chunk:
+            chunks.append(chunk)
+        start += chunk_size - overlap
+    return chunks
 
 
 def index_processed_data():
-    """ENTRY POINT FOR ORCHESTRATOR"""
-    ROOT_DIR = Path(__file__).resolve().parents[2]
-    md_path = ROOT_DIR / "processed_reports" / "final_report2.md" # Updated to final_report2
-    db_path = str(ROOT_DIR / "pharma_db")
+    """ENTRY POINT — called by data_main.py"""
+    client = chromadb.PersistentClient(path=DB_PATH)
+    collection = client.get_or_create_collection(
+        name=COLLECTION_NAME,
+        embedding_function=embedding_fn,
+    )
 
-    if not md_path.exists():
-        print(f"Error: {md_path} not found.")
+    md_files = list(PROCESSED_DIR.glob("*.md"))
+    if not md_files:
+        print(f"No .md files found in {PROCESSED_DIR}")
         return
 
-    # Read the parsed text
-    with open(md_path, "r", encoding="utf-8") as f:
-        report_content = f.read()
+    total = 0
+    for md_path in md_files:
+        with open(md_path, "r", encoding="utf-8") as f:
+            content = f.read()
 
-    # 1. Split the text into chunks first
-    headers_to_split_on = [("#", "Header 1"), ("##", "Header 2")]
-    header_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
-    chunks = header_splitter.split_text(report_content)
+        if not content.strip():
+            print(f"  ⚠️  Skipping empty: {md_path.name}")
+            continue
 
-    # 2. NOW loop through the chunks and inject the AI metadata
-    # Make sure this happens AFTER the split_text call
-    metadata = extract_metadata_with_ai(report_content)
-    metadata["source"] = md_path.name
+        doc_id = hashlib.sha256(content.encode()).hexdigest()[:16]
+        existing = collection.get(where={"doc_id": doc_id})
+        if existing["ids"]:
+            print(f"  ⏭️  Already indexed: {md_path.name}")
+            continue
 
-    for chunk in chunks:
-        # This ensures every individual piece of text carries the labels
-        chunk.metadata.update(metadata)
-        # chunk.metadata = metadata.copy()
-        
+        chunks = chunk_text(content)
+        timestamp = datetime.utcnow().isoformat()
 
-    print(f"--- Indexing {len(chunks)} sections ---")
+        # Extract basic metadata from filename (no LLM needed)
+        stem = md_path.stem  # e.g. "2024_lilly_lebrikizumab_phase2_update"
+        parts = stem.split("_")
+        report_date = parts[0] if parts[0].isdigit() else "Unknown"
+        company_name = parts[1].capitalize() if len(parts) > 1 else "Unknown"
+        drug_name = parts[2].capitalize() if len(parts) > 2 else "Unknown"
 
-    vector_db = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings,
-        persist_directory=db_path,
-        collection_name="pharma_reports"
-    )
-    print(f"--- Vector Store Created in: {db_path} ---")
+        ids, documents, metadatas = [], [], []
+        for i, chunk in enumerate(chunks):
+            ids.append(f"{doc_id}_chunk_{i}")
+            documents.append(chunk)
+            metadatas.append({
+                "doc_id": doc_id,
+                "source": md_path.name,
+                "chunk_index": i,
+                "uploaded_at": timestamp,
+                "file_type": "markdown",
+                "company_name": company_name,
+                "drug_name": drug_name,
+                "report_date": report_date,
+            })
+
+        collection.add(ids=ids, documents=documents, metadatas=metadatas)
+        print(f"  ✅ {md_path.name}: {len(chunks)} chunks")
+        total += len(chunks)
+
+    print(f"--- Indexed {total} total chunks into {DB_PATH} ---")
+
 
 if __name__ == "__main__":
     index_processed_data()
