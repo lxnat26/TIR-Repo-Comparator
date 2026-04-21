@@ -20,9 +20,11 @@ except ImportError:
 try:
     from .crew import CoverageCrew
     from .tools.query_chromadb import QueryDBTool
+    from .text_cleaner import clean_report_text, clean_claim
 except ImportError:
     from CoverageAssistant.backend.coverage_crew.crew import CoverageCrew
     from CoverageAssistant.backend.coverage_crew.tools.query_chromadb import QueryDBTool
+    from CoverageAssistant.backend.coverage_crew.text_cleaner import clean_report_text, clean_claim
 
 DRAFT_PDF = REPO_ROOT / "SmartRepo" / "docsInput" / "2026_lilly_lebrikizumab_bla_submission.pdf"
 def _extract_metadata_from_filename(filename: str) -> dict:
@@ -100,6 +102,8 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
     cc = CoverageCrew()
 
     # Step 1: Extract claims from text
+    report_text = clean_report_text(report_text)
+
     extraction_crew = Crew(
         agents=[cc.claim_extractor()],
         tasks=[cc.claim_extractor_task()],
@@ -109,8 +113,22 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
     extraction_result = extraction_crew.kickoff(inputs={"text": report_text})
 
     claims_data = json.loads(extraction_result.raw)
-    claims = claims_data if isinstance(claims_data, list) else claims_data.get("claims", [])
-    claims = [c for c in claims if c.get("claim_type") not in [None, ""]]
+    raw_claims = claims_data if isinstance(claims_data, list) else claims_data.get("claims", [])
+
+    claims = []
+    seen = set()
+    for c in raw_claims:
+        if c.get("claim_type") in [None, ""]:
+            continue
+        cleaned = clean_claim(c.get("claim", ""))
+        if cleaned is None:
+            continue
+        dedup_key = cleaned.lower()
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        c["claim"] = cleaned
+        claims.append(c)
 
     # Step 2: Query ChromaDB for each claim
     tool = QueryDBTool()
