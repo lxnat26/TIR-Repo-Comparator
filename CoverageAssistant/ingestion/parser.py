@@ -27,12 +27,12 @@ def run_smart_parser(pdf_path):
 
     elements = partition_pdf(
         filename=pdf_path,
-        strategy="auto",
+        strategy="hi_res",
+        include_header=True,
         extract_images_in_pdf=False,
         infer_table_structure=True,
         chunking_strategy="by_title",
-        max_characters=4000,
-        new_after_n_chars=3800,
+        max_characters=1500,
     )
 
     md_output_path = OUTPUT_DIR / f"{pdf_path.stem}.md"

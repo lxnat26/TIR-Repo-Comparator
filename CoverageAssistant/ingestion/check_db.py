@@ -18,19 +18,24 @@ vector_db = Chroma(
 all_docs = vector_db.get()
 print(f"📊 Total chunks in database: {len(all_docs['ids'])}")
 
+unknown_count = 0
+
 # 2. Inspect the first 5 chunks
 if len(all_docs['ids']) > 0:
     print("\n🔍 --- Sample Records ---")
 
-    sample_size = min(5, len(all_docs['ids']))
+    sample_size = min(10, len(all_docs['ids']))        
+    
+    for i in range(len(all_docs['ids'])):
+        if all_docs['metadatas'][i].get("report_date") == "Unkown":
+            print(all_docs['metadatas'][i].get("source"))
 
-    for i in range(sample_size):
-        print(f"\n--- Sample {i+1} ---")
+        # print(f"\n--- Sample {i+1} ---")
 
-        print("\nMetadata:")
-        print(all_docs['metadatas'][i])
+        # print("\nMetadata:")
+        # print(all_docs['metadatas'][i])
 
-        print("\nText Snippet:")
-        print(all_docs['documents'][i][:200] + "...")
+        # print("\nText Snippet:")
+        # print(all_docs['documents'][i][:200] + "...")
 else:
     print("❌ The database is empty!")
