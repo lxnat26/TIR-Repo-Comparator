@@ -1,5 +1,6 @@
 import json
 import re
+import unicodedata
 from pathlib import Path
 import sys
 
@@ -20,13 +21,41 @@ except ImportError:
 try:
     from .crew import CoverageCrew
     from .tools.query_chromadb import QueryDBTool
-    from .text_cleaner import clean_report_text, clean_claim
 except ImportError:
     from CoverageAssistant.backend.coverage_crew.crew import CoverageCrew
     from CoverageAssistant.backend.coverage_crew.tools.query_chromadb import QueryDBTool
-    from CoverageAssistant.backend.coverage_crew.text_cleaner import clean_report_text, clean_claim
 
 DRAFT_PDF = REPO_ROOT / "SmartRepo" / "docsInput" / "2026_lilly_lebrikizumab_bla_submission.pdf"
+
+_MD_LINK_RE = re.compile(r'\[([^\]]+)\]\([^)]+\)')
+_MD_BOLD_ITALIC_RE = re.compile(r'\*+([^*\n]+?)\*+')
+_MD_CODE_RE = re.compile(r'`([^`]+)`')
+_BULLET_PREFIX_RE = re.compile(r'^[\s\*\u00a0•●○▪▫¢#>\-–—›]+')
+_HEADER_PREFIX_RE = re.compile(
+    r'^(sources?|company|date|why it matters|key takeaways?|summary|references?|citations?)\s*:\s*',
+    re.IGNORECASE,
+)
+_WS_RE = re.compile(r'\s+')
+_VALID_CLAIM_TYPES = {"milestone", "efficacy", "safety"}
+_VALID_CLASSIFICATIONS = {"Already Reported", "Refined Detail", "New Information"}
+
+
+def _sanitize_for_ui(s):
+    """Post-LLM cleaner for claim/historical_claim/reason fields.
+    Converts markdown text into plain UI-ready prose: strips bullets, bold/italic
+    markers, inline code, markdown links, non-breaking spaces, section-header
+    prefixes, and collapses all whitespace (including newlines) to single spaces."""
+    if not isinstance(s, str) or not s:
+        return s
+    s = unicodedata.normalize("NFKC", s).replace("\u00a0", " ")
+    s = _MD_LINK_RE.sub(r"\1", s)
+    s = _MD_BOLD_ITALIC_RE.sub(r"\1", s)
+    s = _MD_CODE_RE.sub(r"\1", s)
+    s = s.replace("*", "")
+    s = _BULLET_PREFIX_RE.sub("", s)
+    s = _HEADER_PREFIX_RE.sub("", s)
+    s = _WS_RE.sub(" ", s).strip()
+    return s
 def _extract_metadata_from_filename(filename: str) -> dict:
     """Pull company/drug/date from filename like 2024_lilly_lebrikizumab_phase2.md"""
     stem = Path(filename).stem
@@ -102,8 +131,6 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
     cc = CoverageCrew()
 
     # Step 1: Extract claims from text
-    report_text = clean_report_text(report_text)
-
     extraction_crew = Crew(
         agents=[cc.claim_extractor()],
         tasks=[cc.claim_extractor_task()],
@@ -113,22 +140,8 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
     extraction_result = extraction_crew.kickoff(inputs={"text": report_text})
 
     claims_data = json.loads(extraction_result.raw)
-    raw_claims = claims_data if isinstance(claims_data, list) else claims_data.get("claims", [])
-
-    claims = []
-    seen = set()
-    for c in raw_claims:
-        if c.get("claim_type") in [None, ""]:
-            continue
-        cleaned = clean_claim(c.get("claim", ""))
-        if cleaned is None:
-            continue
-        dedup_key = cleaned.lower()
-        if dedup_key in seen:
-            continue
-        seen.add(dedup_key)
-        c["claim"] = cleaned
-        claims.append(c)
+    claims = claims_data if isinstance(claims_data, list) else claims_data.get("claims", [])
+    claims = [c for c in claims if c.get("claim_type") not in [None, ""]]
 
     # Step 2: Query ChromaDB for each claim
     tool = QueryDBTool()
@@ -162,6 +175,22 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
         raw_claims = final if isinstance(final, list) else final.get("claims", [])
     except Exception:
         return {"claims": [], "raw_output": result.raw}
+
+    for i, c in enumerate(raw_claims):
+        for field in ("claim", "historical_claim", "reason"):
+            if field in c:
+                c[field] = _sanitize_for_ui(c[field])
+
+        ct = c.get("claim_type")
+        if not isinstance(ct, str) or ct not in _VALID_CLAIM_TYPES:
+            c["claim_type"] = (
+                enriched_claims[i].get("claim_type", "")
+                if i < len(enriched_claims) else ""
+            )
+
+        cls = c.get("classification")
+        if not isinstance(cls, str) or cls not in _VALID_CLASSIFICATIONS:
+            c["classification"] = "Uncertain"
 
     status_map = {
         "Contradiction": "contradiction",
@@ -229,7 +258,8 @@ def run():
 
     print("\n\n=== FINAL MAPPED OUTPUT ===\n")
     for claim in result.get("claims", []):
-        print(f"  [{claim['status'].upper()}] {claim['category']} — {claim['title']}")
+        print(f"  [{claim['status'].upper()}] {claim['category']}")
+        print(f"    claim          : {claim['claim_text']}")
         print(f"    why_it_matters : {claim['why_it_matters']}")
         if claim.get("previously_reported"):
             print(f"    historical     : {claim['previously_reported']['summary']}")
