@@ -18,16 +18,6 @@ claim_extractor_task:
     If a sentence cannot be clearly classified as 'milestone', 'efficacy', or 'safety', 
     do not include it in the output.
 
-    Claim text normalization rules (MANDATORY):
-    - Each claim value must be a single clean sentence.
-    - Remove any leading bullets, markers, or symbols such as: *, -, •, ●, ¢, #, o.
-    - Remove HTML/entity artifacts.
-    - Do not include section headers or labels (for example: Sources:, Company:, Date:, Why it matters:).
-    - Preserve the factual content, but output plain sentence text only.
-    - Do not include newline characters inside a claim.
-    - Do not emit the same sentence more than once, even if it touches multiple claim types.
-    - If a sentence contains both milestone and efficacy/safety information, choose the single most relevant claim_type and emit one entry only.
-
     REPORT: 
     {text}
     
@@ -122,3 +112,4 @@ claim_classifier_task:
       }
     ]
   agent: claim_classifier
+
