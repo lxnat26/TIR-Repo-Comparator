@@ -27,15 +27,15 @@ if len(all_docs['ids']) > 0:
     sample_size = min(10, len(all_docs['ids']))        
     
     for i in range(len(all_docs['ids'])):
-        if all_docs['metadatas'][i].get("report_date") == "Unkown":
-            print(all_docs['metadatas'][i].get("source"))
+        # if all_docs['metadatas'][i].get("report_date") == "Unkown":
+        #     print(all_docs['metadatas'][i].get("source"))
 
-        # print(f"\n--- Sample {i+1} ---")
+        print(f"\n--- Sample {i+1} ---")
 
-        # print("\nMetadata:")
-        # print(all_docs['metadatas'][i])
+        print("\nMetadata:")
+        print(all_docs['metadatas'][i])
 
-        # print("\nText Snippet:")
-        # print(all_docs['documents'][i][:200] + "...")
+        print("\nText Snippet:")
+        print(all_docs['documents'][i][:200] + "...")
 else:
     print("❌ The database is empty!")
