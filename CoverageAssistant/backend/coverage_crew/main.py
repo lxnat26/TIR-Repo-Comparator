@@ -1,6 +1,4 @@
 import json
-import re
-import unicodedata
 from pathlib import Path
 import sys
 
@@ -21,88 +19,25 @@ except ImportError:
 try:
     from .crew import CoverageCrew
     from .tools.query_chromadb import QueryDBTool
+    from .utils.helpers import (
+        VALID_CLAIM_TYPES,
+        VALID_CLASSIFICATIONS,
+        extract_metadata_from_filename,
+        parse_model_json,
+        sanitize_for_ui,
+    )
 except ImportError:
     from CoverageAssistant.backend.coverage_crew.crew import CoverageCrew
     from CoverageAssistant.backend.coverage_crew.tools.query_chromadb import QueryDBTool
+    from CoverageAssistant.backend.coverage_crew.utils.helpers import (
+        VALID_CLAIM_TYPES,
+        VALID_CLASSIFICATIONS,
+        extract_metadata_from_filename,
+        parse_model_json,
+        sanitize_for_ui,
+    )
 
 DRAFT_PDF = REPO_ROOT / "SmartRepo" / "docsInput" / "2026_lilly_lebrikizumab_bla_submission.pdf"
-
-_MD_LINK_RE = re.compile(r'\[([^\]]+)\]\([^)]+\)')
-_MD_BOLD_ITALIC_RE = re.compile(r'\*+([^*\n]+?)\*+')
-_MD_CODE_RE = re.compile(r'`([^`]+)`')
-_BULLET_PREFIX_RE = re.compile(r'^[\s\*\u00a0•●○▪▫¢#>\-–—›]+')
-_HEADER_PREFIX_RE = re.compile(
-    r'^(sources?|company|date|why it matters|key takeaways?|summary|references?|citations?)\s*:\s*',
-    re.IGNORECASE,
-)
-_WS_RE = re.compile(r'\s+')
-_VALID_CLAIM_TYPES = {"milestone", "efficacy", "safety"}
-_VALID_CLASSIFICATIONS = {"Already Reported", "Refined Detail", "New Information"}
-
-
-def _parse_model_json(raw_text: str):
-    """Parse JSON from model output that may include code fences, preamble text,
-    or unescaped control characters."""
-    text = (raw_text or "").strip()
-    if not text:
-        raise ValueError("Model output was empty")
-
-    if text.startswith("```"):
-        lines = text.splitlines()
-        if lines and lines[0].startswith("```"):
-            lines = lines[1:]
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines).strip()
-
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    try:
-        return json.loads(text, strict=False)
-    except json.JSONDecodeError:
-        pass
-
-    decoder = json.JSONDecoder(strict=False)
-    for token in ("{", "["):
-        start = text.find(token)
-        while start != -1:
-            try:
-                parsed, _ = decoder.raw_decode(text, start)
-                return parsed
-            except json.JSONDecodeError:
-                start = text.find(token, start + 1)
-
-    raise ValueError(f"Could not parse JSON from model output: {text[:200]}")
-
-
-def _sanitize_for_ui(s):
-    """Post-LLM cleaner for claim/historical_claim/reason fields.
-    Converts markdown text into plain UI-ready prose: strips bullets, bold/italic
-    markers, inline code, markdown links, non-breaking spaces, section-header
-    prefixes, and collapses all whitespace (including newlines) to single spaces."""
-    if not isinstance(s, str) or not s:
-        return s
-    s = unicodedata.normalize("NFKC", s).replace("\u00a0", " ")
-    s = _MD_LINK_RE.sub(r"\1", s)
-    s = _MD_BOLD_ITALIC_RE.sub(r"\1", s)
-    s = _MD_CODE_RE.sub(r"\1", s)
-    s = s.replace("*", "")
-    s = _BULLET_PREFIX_RE.sub("", s)
-    s = _HEADER_PREFIX_RE.sub("", s)
-    s = _WS_RE.sub(" ", s).strip()
-    return s
-def _extract_metadata_from_filename(filename: str) -> dict:
-    """Pull company/drug/date from filename like 2024_lilly_lebrikizumab_phase2.md"""
-    stem = Path(filename).stem
-    parts = stem.split("_")
-    return {
-        "report_date": parts[0] if parts and parts[0].isdigit() else "Unknown",
-        "company_name": parts[1].capitalize() if len(parts) > 1 else "Unknown",
-        "drug_name": parts[2].capitalize() if len(parts) > 2 else "Unknown",
-    }
 
 
 # def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str = None) -> dict:
@@ -163,7 +98,6 @@ def _extract_metadata_from_filename(filename: str) -> dict:
 
 def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str = None) -> dict:
     """
-    Core logic shared by run() and run_on_text().
     Takes already-extracted text, returns structured claims result.
     """
     cc = CoverageCrew()
@@ -177,7 +111,7 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
     )
     extraction_result = extraction_crew.kickoff(inputs={"text": report_text})
 
-    claims_data = _parse_model_json(extraction_result.raw)
+    claims_data = parse_model_json(extraction_result.raw)
     claims = claims_data if isinstance(claims_data, list) else claims_data.get("claims", [])
     claims = [c for c in claims if c.get("claim_type") not in [None, ""]]
 
@@ -209,7 +143,7 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
 
     # Step 4: Parse and remap to frontend shape
     try:
-        final = _parse_model_json(result.raw)
+        final = parse_model_json(result.raw)
         raw_claims = final if isinstance(final, list) else final.get("claims", [])
     except Exception:
         return {"claims": [], "raw_output": result.raw}
@@ -217,17 +151,17 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
     for i, c in enumerate(raw_claims):
         for field in ("claim", "historical_claim", "reason"):
             if field in c:
-                c[field] = _sanitize_for_ui(c[field])
+                c[field] = sanitize_for_ui(c[field])
 
         ct = c.get("claim_type")
-        if not isinstance(ct, str) or ct not in _VALID_CLAIM_TYPES:
+        if not isinstance(ct, str) or ct not in VALID_CLAIM_TYPES:
             c["claim_type"] = (
                 enriched_claims[i].get("claim_type", "")
                 if i < len(enriched_claims) else ""
             )
 
         cls = c.get("classification")
-        if not isinstance(cls, str) or cls not in _VALID_CLASSIFICATIONS:
+        if not isinstance(cls, str) or cls not in VALID_CLASSIFICATIONS:
             c["classification"] = "Uncertain"
 
     status_map = {
@@ -286,7 +220,7 @@ def run():
     with report_path.open("r", encoding="utf-8") as f:
         report_text = f.read()
 
-    meta = _extract_metadata_from_filename(DRAFT_PDF.name)
+    meta = extract_metadata_from_filename(DRAFT_PDF.name)
     drug_name = meta.get("drug_name")
     company_name = meta.get("company_name")
 
