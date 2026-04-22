@@ -11,7 +11,7 @@ from typing import Optional
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from CoverageAssistant.ingestion.data_main import ingest_pdf
+from CoverageAssistant.ingestion.data_main import ingest_document
 from CoverageAssistant.ingestion.vector_store_aligned import get_collection
 from CoverageAssistant.ingestion import parser as pdf_parser
 from CoverageAssistant.backend.coverage_crew.main import run_on_text
