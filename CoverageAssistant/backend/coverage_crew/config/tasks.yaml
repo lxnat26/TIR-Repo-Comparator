@@ -27,19 +27,33 @@ claim_extractor_task:
       If the milestone claim does not clearly map to one of the above, specific_type MUST be "".
     - specific_type is case-sensitive and must be a literal string from the allowed set or "".
 
-    'claim' text rules — self-containment:
-    - Each 'claim' string MUST be understandable on its own, without the rest of the document.
-    - If the report header/metadata identifies a specific drug, the claim text MUST name that drug
-      explicitly. Resolve generic references like "the therapy", "the drug", "the treatment",
-      "results", or pronouns (it/this) to the actual drug name drawn from the report.
-    - If the report identifies a specific company and the sentence is about that company's actions
-      (submissions, announcements, trial conduct), include the company name in the claim.
-    - Do NOT invent drug or company names. Only use names that appear in the report text.
-    - Preserve the original factual content; only add the drug/company context so the sentence
-      can stand alone. Example rewrite:
-        source: "The therapy showed improvements in eczema severity scores."
-        header names "Lebrikizumab"
-        claim:  "Lebrikizumab showed improvements in eczema severity scores."
+    'claim' text rules — verbatim with ONE allowed substitution:
+    - The 'claim' string MUST be a word-for-word copy of a sentence (or two joined sentences)
+      from the REPORT. Copy every word exactly as it appears.
+    - Do NOT paraphrase. Do NOT summarize. Do NOT shorten. Do NOT merge multiple sentences
+      into new wording. Do NOT remove adjectives or qualifiers such as "encouraging",
+      "promising", "favorable", "significant". Do NOT change tense or voice.
+    - The ONLY allowed modification is substituting a generic reference or pronoun with the
+      drug name drawn from the REPORT header. Allowed substitutions (and ONLY these):
+        "the therapy"   -> "<drug name>"
+        "the drug"      -> "<drug name>"
+        "the treatment" -> "<drug name>"
+        "the biologic"  -> "<drug name>"
+        "it" / "this"   -> "<drug name>"  (only when unambiguously referring to the drug)
+        "the results"   -> "<drug name>'s results"  (only when the results described are for the drug)
+      Every other word in the sentence MUST remain identical to the source.
+    - If the REPORT does not name a specific drug in its header/metadata, do NOT substitute
+      anything — copy the sentence verbatim.
+    - Do NOT invent drug or company names. Only use names that appear in the REPORT.
+    - Example (source: "Eli Lilly reported encouraging Phase II results for lebrikizumab..."):
+        CORRECT claim: "Eli Lilly reported encouraging Phase II results for lebrikizumab..."
+        WRONG   claim (dropped adjective):
+          "Eli Lilly reported Phase II results for lebrikizumab..."
+    - Example (source: "The therapy showed improvements in eczema severity scores...",
+      header names "Lebrikizumab"):
+        CORRECT claim: "Lebrikizumab showed improvements in eczema severity scores..."
+        WRONG   claim (paraphrased):
+          "Lebrikizumab improved eczema severity."
 
     REPORT:
     {text}
