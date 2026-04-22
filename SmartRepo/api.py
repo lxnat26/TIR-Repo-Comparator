@@ -5,17 +5,18 @@ import shutil
 import uuid
 import sys
 from datetime import datetime
-from pypdf import PdfReader
 from pydantic import BaseModel
 from typing import Optional
-import io
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from CoverageAssistant.ingestion.data_main import ingest_pdf
 from CoverageAssistant.ingestion.vector_store_aligned import get_collection
+from CoverageAssistant.ingestion import parser as pdf_parser
 from CoverageAssistant.backend.coverage_crew.main import run_on_text
+
+PROCESSED_DIR = REPO_ROOT / "processed_reports"
 
 app = FastAPI()
 
@@ -68,12 +69,15 @@ async def analyze_document(
     competitor: Optional[str] = Form(None),
     drug: Optional[str] = Form(None),
 ):
-    # 1. Extract text from PDF
-    contents = await file.read()
-    reader = PdfReader(io.BytesIO(contents))
-    document_text = ""
-    for page in reader.pages:
-        document_text += page.extract_text() or ""
+
+    save_path = DOCS_PATH / file.filename
+    with open(save_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    pdf_parser.run_smart_parser(save_path)
+
+    md_path = PROCESSED_DIR / f"{save_path.stem}.md"
+    with md_path.open("r", encoding="utf-8") as f:
+        document_text = f.read()
 
     # 2. Run the crew on extracted text
     try:

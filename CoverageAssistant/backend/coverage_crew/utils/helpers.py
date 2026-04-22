@@ -16,6 +16,12 @@ _WS_RE = re.compile(r"\s+")
 VALID_CLAIM_TYPES = {"milestone", "efficacy", "safety"}
 VALID_CLASSIFICATIONS = {"Already Reported", "Refined Detail", "New Information"}
 
+VALID_SPECIFIC_TYPES = {
+    "milestone": {"drug approval", "fda", "data release", ""},
+    "efficacy":  {""},
+    "safety":    {""},
+}
+
 
 def parse_model_json(raw_text: str):
     """Parse JSON from model output that may include fences/noise/control chars."""

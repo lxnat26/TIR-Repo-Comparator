@@ -21,6 +21,7 @@ try:
     from .utils.helpers import (
         VALID_CLAIM_TYPES,
         VALID_CLASSIFICATIONS,
+        VALID_SPECIFIC_TYPES,
         extract_metadata_from_filename,
         parse_model_json,
         sanitize_for_ui,
@@ -31,6 +32,7 @@ except ImportError:
     from CoverageAssistant.backend.coverage_crew.utils.helpers import (
         VALID_CLAIM_TYPES,
         VALID_CLASSIFICATIONS,
+        VALID_SPECIFIC_TYPES,
         extract_metadata_from_filename,
         parse_model_json,
         sanitize_for_ui,
@@ -38,62 +40,6 @@ except ImportError:
 
 DRAFT_PDF = REPO_ROOT / "SmartRepo" / "docsInput" / "2026_lilly_lebrikizumab_bla_submission.pdf"
 
-
-# def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str = None) -> dict:
-#     """
-#     Core logic shared by run() and run_on_text().
-#     Takes already-extracted text, returns structured claims result.
-#     """
-#     cc = CoverageCrew()
-
-#     # Step 1: Extract claims from text
-#     extraction_crew = Crew(
-#         agents=[cc.claim_extractor()],
-#         tasks=[cc.claim_extractor_task()],
-#         process=Process.sequential,
-#         verbose=True,
-#     )
-#     extraction_result = extraction_crew.kickoff(inputs={"text": report_text})
-
-#     claims_data = json.loads(extraction_result.raw)
-#     claims = claims_data if isinstance(claims_data, list) else claims_data.get("claims", [])
-#     claims = [c for c in claims if c.get("claim_type") not in [None, ""]]
-
-#     # Step 2: Query ChromaDB for each claim
-#     tool = QueryDBTool()
-#     enriched_claims = []
-#     for claim in claims:
-#         historical = tool._run(
-#             claim["claim"],
-#             drug_name=drug_name,
-#             company_name=company_name,
-#         )
-#         enriched_claims.append({
-#             "claim_type": claim["claim_type"],
-#             "claim_text": claim["claim"],
-#             "historical_match": historical,
-#         })
-
-#     # Step 3: Compare + classify
-#     comparison_crew = Crew(
-#         agents=[cc.claim_comparator(), cc.claim_classifier()],
-#         tasks=[cc.claim_comparator_task(), cc.claim_classifier_task()],
-#         process=Process.sequential,
-#         verbose=True,
-#     )
-#     result = comparison_crew.kickoff(
-#         inputs={"enriched_claims": json.dumps(enriched_claims, indent=2)}
-#     )
-
-#     # Parse final output into a list the API can return
-#     try:
-#         final = json.loads(result.raw)
-#         if isinstance(final, list):
-#             return {"claims": final}
-#         return {"claims": final.get("claims", [])}
-#     except Exception:
-#         # If CrewAI returns plain text, wrap it so the API doesn't break
-#         return {"claims": [], "raw_output": result.raw}
 
 def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str = None) -> dict:
     """
@@ -111,22 +57,54 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
     extraction_result = extraction_crew.kickoff(inputs={"text": report_text})
 
     claims_data = parse_model_json(extraction_result.raw)
-    claims = claims_data if isinstance(claims_data, list) else claims_data.get("claims", [])
-    claims = [c for c in claims if c.get("claim_type") not in [None, ""]]
+
+    # Defensive unwrapping: llama3.1 doesn't always respect the schema envelope.
+    # Flatten any of these shapes into a plain list of claim dicts:
+    #   {"claims": [...]}          → inner list (expected)
+    #   [ {claim}, {claim}, ... ]  → already flat
+    #   [ {"claims": [...]}, ... ] → concat inner lists (observed bug)
+    if isinstance(claims_data, dict):
+        claims = claims_data.get("claims", [])
+    elif isinstance(claims_data, list):
+        claims = []
+        saw_wrapper = False
+        for item in claims_data:
+            if isinstance(item, dict) and isinstance(item.get("claims"), list):
+                saw_wrapper = True
+                claims.extend(item["claims"])
+        if not saw_wrapper:
+            claims = [c for c in claims_data if isinstance(c, dict)]
+    else:
+        claims = []
+
+    # Validate claim_type; coerce invalid specific_type to "" rather than dropping the claim.
+    valid_claims = []
+    for c in claims:
+        ct = c.get("claim_type")
+        if ct not in VALID_CLAIM_TYPES or not c.get("claim"):
+            continue
+        st = c.get("specific_type", "")
+        if st not in VALID_SPECIFIC_TYPES[ct]:
+            st = ""
+        c["specific_type"] = st
+        valid_claims.append(c)
+    claims = valid_claims
 
     # Step 2: Query ChromaDB for each claim
     tool = QueryDBTool()
     enriched_claims = []
     for claim in claims:
-        historical = tool._run(
+        match = tool.search_with_metadata(
             claim["claim"],
             drug_name=drug_name,
             company_name=company_name,
         )
         enriched_claims.append({
-            "claim_type": claim["claim_type"],
-            "claim": claim["claim"],
-            "historical_match": historical,
+            "claim_type":      claim["claim_type"],
+            "specific_type":   claim["specific_type"], 
+            "claim":           claim["claim"],
+            "historical_match": match["text"],
+            "report_date":     match["report_date"],   
         })
 
     # Step 3: Compare + classify
@@ -147,61 +125,50 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
     except Exception:
         return {"claims": [], "raw_output": result.raw}
 
+    out = []
     for i, c in enumerate(raw_claims):
-        for field in ("claim", "historical_claim", "reason"):
-            if field in c:
-                c[field] = sanitize_for_ui(c[field])
+        src = enriched_claims[i] if i < len(enriched_claims) else {}
 
+       
         ct = c.get("claim_type")
-        if not isinstance(ct, str) or ct not in VALID_CLAIM_TYPES:
-            c["claim_type"] = (
-                enriched_claims[i].get("claim_type", "")
-                if i < len(enriched_claims) else ""
-            )
+        if ct not in VALID_CLAIM_TYPES:
+            ct = src.get("claim_type", "")
 
+        
+        if "specific_type" in c and c["specific_type"] in VALID_SPECIFIC_TYPES.get(ct, {""}):
+            st = c["specific_type"]
+        else:
+            st = src.get("specific_type", "")
+
+        
         cls = c.get("classification")
-        if not isinstance(cls, str) or cls not in VALID_CLASSIFICATIONS:
-            c["classification"] = "Uncertain"
+        if cls not in VALID_CLASSIFICATIONS:
+            cls = "Uncertain"
 
-    status_map = {
-        "Contradiction": "contradiction",
-        "New Information": "new_information",
-        "Already Reported": "already_reported",
-        "Refined Detail": "refined_detail",
-        "Uncertainty": "uncertainty",
-    }
-    category_map = {
-        "efficacy": "efficacy",
-        "safety": "safety",
-        "milestone": "milestone",
-        "regulatory": "regulatory",
-        "drug approval": "regulatory",
-    }
+        historical_claim = sanitize_for_ui(
+            c.get("historical_claim") or c.get("historical_match") or ""
+        )
 
-    mapped = []
-    for i, c in enumerate(raw_claims):
-        raw_status = c.get("classification", "")
-        raw_category = (c.get("claim_type") or "other").lower()
-        claim_text = c.get("claim") or c.get("claim_text", "")
-        historical = c.get("historical_claim") or c.get("historical_match") or ""
-        is_new = not historical or historical == claim_text
+        # report_date is only meaningful when there IS a real historical match.
+        # If the classifier decided "New Information" OR the historical_claim is the
+        # no-match sentinel, clear the date to "Unknown" — the nearest-neighbor date
+        # Python captured is stale in that case.
+        if cls == "New Information" or historical_claim == "No historical matches found":
+            report_date = "Unknown"
+        else:
+            report_date = src.get("report_date", "Unknown")
 
-        mapped.append({
-            "id": str(i),
-            "claim_text": claim_text,
-            "category": category_map.get(raw_category, "other"),
-            "status": status_map.get(raw_status, "uncertainty"),
-            "title": claim_text[:60] + ("..." if len(claim_text) > 60 else ""),
-            "previously_reported": None if is_new else {
-                "date": "Unknown",
-                "source": "Historical DB",
-                "summary": historical,
-            },
-            "whats_new": None,
-            "why_it_matters": c.get("reason", ""),
+        out.append({
+            "claim_type":       ct,
+            "specific_type":    st,
+            "claim":            sanitize_for_ui(c.get("claim", "")),
+            "historical_claim": historical_claim,
+            "report_date":      report_date,
+            "classification":   cls,
+            "reason":           sanitize_for_ui(c.get("reason", "")),
         })
 
-    return {"claims": mapped}
+    return {"claims": out}
 
 def run_on_text(report_text: str, drug_name: str = None, company_name: str = None) -> dict:
     """Called by api.py after extracting text from an uploaded PDF."""
@@ -227,14 +194,8 @@ def run():
 
     result = _run_crew_on_text(report_text, drug_name=drug_name, company_name=company_name)
 
-    print("\n\n=== FINAL MAPPED OUTPUT ===\n")
-    for claim in result.get("claims", []):
-        print(f"  [{claim['status'].upper()}] {claim['category']}")
-        print(f"    claim          : {claim['claim_text']}")
-        print(f"    why_it_matters : {claim['why_it_matters']}")
-        if claim.get("previously_reported"):
-            print(f"    historical     : {claim['previously_reported']['summary']}")
-        print()
+    print("\n\n=== FINAL OUTPUT ===\n")
+    print(json.dumps(result.get("claims", []), indent=2))
 
 
 if __name__ == "__main__":

@@ -15,18 +15,42 @@ claim_extractor_task:
   
     'claim_type' MUST be 'milestone', 'efficacy', 'safety'
     'claim_type' MUST have only one of those types: 'milestone', 'efficacy', 'safety'
-    If a sentence cannot be clearly classified as 'milestone', 'efficacy', or 'safety', 
+    If a sentence cannot be clearly classified as 'milestone', 'efficacy', or 'safety',
     do not include it in the output.
 
-    REPORT: 
+    'specific_type' rules:
+    - Applies ONLY when claim_type is 'milestone'. For 'efficacy' or 'safety', specific_type MUST be "".
+    - When claim_type is 'milestone', specific_type MUST be exactly one of:
+        "drug approval"  — the drug has received marketing authorization from a regulator
+        "fda"            — any FDA-related action, submission, decision, or communication
+        "data release"   — clinical trial data, readouts, results, or data publication
+      If the milestone claim does not clearly map to one of the above, specific_type MUST be "".
+    - specific_type is case-sensitive and must be a literal string from the allowed set or "".
+
+    'claim' text rules — self-containment:
+    - Each 'claim' string MUST be understandable on its own, without the rest of the document.
+    - If the report header/metadata identifies a specific drug, the claim text MUST name that drug
+      explicitly. Resolve generic references like "the therapy", "the drug", "the treatment",
+      "results", or pronouns (it/this) to the actual drug name drawn from the report.
+    - If the report identifies a specific company and the sentence is about that company's actions
+      (submissions, announcements, trial conduct), include the company name in the claim.
+    - Do NOT invent drug or company names. Only use names that appear in the report text.
+    - Preserve the original factual content; only add the drug/company context so the sentence
+      can stand alone. Example rewrite:
+        source: "The therapy showed improvements in eczema severity scores."
+        header names "Lebrikizumab"
+        claim:  "Lebrikizumab showed improvements in eczema severity scores."
+
+    REPORT:
     {text}
-    
+
     Do not include any prefix, explanation, or commentary. Return ONLY the JSON object.
   expected_output: |
     {
       "claims": [
         {
           "claim_type": "milestone | efficacy | safety",
+          "specific_type": "drug approval | fda | data release | \"\"",
           "claim": "string"
         }
       ]
@@ -43,6 +67,7 @@ claim_comparator_task:
 
     For EACH item in the list:
     - The output key for the claim text MUST be "claim" (not "claim_txt" or any other variation)
+    - Copy "specific_type" VERBATIM from the input item into your output object. Do not reinterpret or change it.
     - Use "historical_match" as the historical_match value
     - Determine what_changed, what_is_same, and whether there is a contradiction
     - If "historical_match" is "No historical matches found", set all comparison
@@ -54,6 +79,7 @@ claim_comparator_task:
     [
       {
         "claim_type": "milestone | efficacy | safety",
+        "specific_type": "drug approval | fda | data release | \"\"",
         "claim": "string - the new claim text",
         "historical_match": "string",
         "what_changed": "string",
@@ -79,6 +105,7 @@ claim_classifier_task:
     IMPORTANT: If historical_match is "No historical matches found", classification MUST be 'New Information'.
     IMPORTANT: 'Refined Detail' requires a meaningful historical match on the SAME topic. If the historical match is about a different subject entirely, use 'New Information' instead.
     IMPORTANT: Do NOT use 'Contradiction' or 'Uncertain' — every claim must be 'Already Reported', 'Refined Detail', or 'New Information'.
+    IMPORTANT: Copy "specific_type" VERBATIM from each comparator output object into your output object. Do not alter it.
 
     Always provide a specific reason explaining your classification for each claim.
     When writing the reason:
@@ -105,6 +132,7 @@ claim_classifier_task:
     [
       {
         "claim_type": "milestone | efficacy | safety",
+        "specific_type": "drug approval | fda | data release | \"\"",
         "claim": "string - copy the exact claim text from comparator input",
         "historical_claim": "string - exact historical match text",
         "classification": "Already Reported | Refined Detail | New Information",
