@@ -13,16 +13,13 @@ import parser as pdf_parser
 import vector_store_aligned
 
 
-def ingest_pdf(pdf_path: Path) -> None:
-    """Parse one PDF → markdown → index into pharma_db.
+def ingest_document(doc_path: Path) -> None:
+    """Parse one PDF/DOCX -> markdown -> index into pharma_db."""
+    doc_path = Path(doc_path)
+    print(f"📄 Parsing {doc_path.name}")
+    pdf_parser.run_smart_parser(doc_path)
 
-    Used by both the per-upload API path and the batch run_ingestion_pipeline().
-    """
-    pdf_path = Path(pdf_path)
-    print(f"📄 Parsing {pdf_path.name}")
-    pdf_parser.run_smart_parser(pdf_path)
-
-    md_path = PROCESSED_DIR / f"{pdf_path.stem}.md"
+    md_path = PROCESSED_DIR / f"{doc_path.stem}.md"
     if not md_path.exists():
         print(f"❌ Expected markdown not found after parsing: {md_path}")
         return
@@ -31,34 +28,34 @@ def ingest_pdf(pdf_path: Path) -> None:
 
 
 def run_ingestion_pipeline():
-    """Batch entry point — parses every PDF in SmartRepo/docs and indexes each."""
+    """Batch entry point — parses every PDF/DOCX in SmartRepo/docs and indexes each."""
     print("\n--- Starting Full Data Pipeline ---")
-    print(f"Looking for PDFs in: {INPUT_DIR.resolve()}")
+    print(f"Looking for PDF/DOCX files in: {INPUT_DIR.resolve()}")
 
     if not INPUT_DIR.exists():
         print("❌ Input directory not found.")
         return False
 
-    pdf_files = list(INPUT_DIR.rglob("*.pdf"))
-    if not pdf_files:
-        print("❌ No PDFs found.")
+    doc_files = list(INPUT_DIR.rglob("*.pdf")) + list(INPUT_DIR.rglob("*.docx"))
+    if not doc_files:
+        print("❌ No PDF or DOCX files found.")
         return False
 
-    print(f"✅ Found {len(pdf_files)} PDFs")
+    print(f"✅ Found {len(doc_files)} files")
 
     if DB_PATH.exists():
         print(f"🧹 Clearing old database at {DB_PATH}...")
         shutil.rmtree(DB_PATH)
 
     parsed_count = 0
-    for pdf in pdf_files:
+    for doc in doc_files:
         try:
-            ingest_pdf(pdf)
+            ingest_document(doc)
             parsed_count += 1
         except Exception as e:
-            print(f"❌ Failed ingesting {pdf.name}: {e}")
+            print(f"❌ Failed ingesting {doc.name}: {e}")
 
-    print(f"\nIngested {parsed_count}/{len(pdf_files)} PDFs")
+    print(f"\nIngested {parsed_count}/{len(doc_files)} files")
     print("\n--- Data Pipeline Complete ---")
     return True
 
