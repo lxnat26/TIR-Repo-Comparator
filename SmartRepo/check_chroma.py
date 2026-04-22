@@ -1,15 +1,17 @@
+"""Inspector: dump contents of the unified pharma_db/pharma_reports collection."""
 from pathlib import Path
 import chromadb
 
-BASE_DIR = Path(__file__).resolve().parent
-CHROMA_DIR = BASE_DIR / "chroma_store"
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CHROMA_DIR = REPO_ROOT / "pharma_db"
+COLLECTION_NAME = "pharma_reports"
 
 client = chromadb.PersistentClient(path=str(CHROMA_DIR))
-collection = client.get_or_create_collection(name="reports")
+collection = client.get_or_create_collection(name=COLLECTION_NAME)
 
 count = collection.count()
 print(f"Chroma path: {CHROMA_DIR}")
-print(f"Collection name: reports")
+print(f"Collection name: {COLLECTION_NAME}")
 print(f"Total items stored: {count}")
 
 if count > 0:
