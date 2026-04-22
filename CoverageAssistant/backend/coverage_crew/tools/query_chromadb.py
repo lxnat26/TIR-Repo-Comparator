@@ -122,27 +122,53 @@ class QueryDBTool(BaseTool):
                 else:
                     print("  no metadata matched drug/company keywords; using full collection")
 
+            query_parts = []
+            if drug_name:
+                query_parts.append(drug_name)
+            if company_name:
+                query_parts.append(company_name)
+            query_parts.append(claim_text)
+            enriched_query = " ".join(query_parts)
+
+            MIN_RELEVANCE = 0.5
+
             winner = None
+            winner_score = None
             attempts = [chroma_filter, None] if chroma_filter else [None]
 
             for attempt_filter in attempts:
                 label = str(attempt_filter) if attempt_filter else "no filter"
-                results = vector_store.similarity_search(
-                    claim_text, k=3, filter=attempt_filter
+                scored = vector_store.similarity_search_with_relevance_scores(
+                    enriched_query, k=3, filter=attempt_filter
                 )
-                if results:
-                    print(f"  query returned {len(results)} results with: {label}")
-                    winner = results[0]
-                    break
-                else:
+                if not scored:
                     print(f"  query empty with: {label}; trying next fallback")
+                    continue
+
+                print(f"  top-{len(scored)} candidates with: {label}")
+                for doc, score in scored:
+                    src = (doc.metadata or {}).get("source", "?")
+                    preview = doc.page_content[:80].replace("\n", " ")
+                    print(f"    score={score:.3f}  source={src}  content={preview!r}")
+
+                best_doc, best_score = scored[0]
+                if best_score < MIN_RELEVANCE:
+                    print(
+                        f"  best score {best_score:.3f} < threshold {MIN_RELEVANCE}; "
+                        f"treating as no match (with: {label})"
+                    )
+                    continue
+
+                winner = best_doc
+                winner_score = best_score
+                break
 
             if winner is None:
                 return {"text": "No historical matches found", "report_date": "Unknown"}
 
             best_sentence = self._extract_best_sentence(winner.page_content, claim_text)
             report_date = winner.metadata.get("report_date", "Unknown") if winner.metadata else "Unknown"
-            print(f"  returning: {best_sentence}")
+            print(f"  returning (score={winner_score:.3f}): {best_sentence}")
             print(f"  report_date: {report_date}")
             return {"text": best_sentence, "report_date": report_date}
 
@@ -155,5 +181,5 @@ class QueryDBTool(BaseTool):
         drug_name: Optional[str] = None,
         company_name: Optional[str] = None,
     ) -> str:
-        """CrewAI BaseTool contract — must return a string (agent observation)."""
+
         return self.search_with_metadata(claim_text, drug_name, company_name)["text"]
