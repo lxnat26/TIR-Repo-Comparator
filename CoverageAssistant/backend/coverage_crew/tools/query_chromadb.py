@@ -1,5 +1,5 @@
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Type, Optional
 from crewai.tools import BaseTool
 from pydantic import BaseModel, Field
@@ -11,7 +11,6 @@ repo_root = Path(__file__).resolve().parents[4]
 PHARMA_DB_PATH = str(repo_root / "pharma_db")
 COLLECTION_NAME = "pharma_reports"
 
-DATE_WINDOW_DAYS = 180
 
 _BULLET_PATTERN = re.compile(r'[\u25cf\u25cb\u2022\u2013\u2014●•–—]\s*')
 
@@ -138,24 +137,6 @@ class QueryDBTool(BaseTool):
                       "returning no match (refusing to fall back to unfiltered search)")
                 return {"text": "No historical matches found", "report_date": "Unknown"}
 
-            today_date = datetime.now(timezone.utc).date()
-            cutoff_date = today_date - timedelta(days=DATE_WINDOW_DAYS)
-            today_iso = today_date.isoformat()
-            cutoff_iso = cutoff_date.isoformat()
-            print(f"  date window: report_date in [{cutoff_iso}, {today_iso}] "
-                  f"({DATE_WINDOW_DAYS} days)")
-
-            def in_window(meta) -> bool:
-                """True iff meta.report_date is a real ISO date inside the window."""
-                rd = ((meta or {}).get("report_date") or "")[:10]
-                if len(rd) != 10:
-                    return False
-                try:
-                    doc_date = datetime.strptime(rd, "%Y-%m-%d").date()
-                except ValueError:
-                    return False
-                return cutoff_date <= doc_date <= today_date
-
             query_parts = []
             if drug_name:
                 query_parts.append(drug_name)
@@ -181,27 +162,8 @@ class QueryDBTool(BaseTool):
                     print(f"  query empty with: {label}; trying next fallback")
                     continue
 
-
-                in_window_scored = [(d, s) for d, s in scored_raw if in_window(d.metadata)]
-                rejected = len(scored_raw) - len(in_window_scored)
-
-                if in_window_scored:
-                    scored = in_window_scored
-                    scope = f"in-window [{cutoff_iso}, {today_iso}]"
-                    if rejected:
-                        print(f"  {rejected}/{len(scored_raw)} candidates dropped by "
-                              f"date window [{cutoff_iso}, {today_iso}]")
-                elif attempt_filter is not None:
-   
-                    scored = scored_raw
-                    scope = "same drug, any date (no in-window history)"
-                    print(f"  no in-window candidates for this drug; "
-                          f"relaxing date window to include older same-drug history")
-                else:
-                   
-                    print(f"  no in-window candidates with: {label}; "
-                          f"trying next fallback")
-                    continue
+                scored = scored_raw
+                scope = "all dates"
 
                 display = scored[:3]
                 print(f"  top-{len(display)} candidates ({scope}) with: {label}")
