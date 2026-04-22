@@ -38,7 +38,7 @@ except ImportError:
         sanitize_for_ui,
     )
 
-DRAFT_PDF = REPO_ROOT / "SmartRepo" / "docsInput" / "2026_lilly_lebrikizumab_bla_submission.pdf"
+DRAFT_PDF = REPO_ROOT / "SmartRepo" / "docsInput" / "2024_sanofi_dupixent_ad_trial_results.pdf"
 
 
 def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str = None) -> dict:
