@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from unstructured.partition.pdf import partition_pdf
+from text_metadata_utils import normalize_text
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 INPUT_DIR = ROOT_DIR / "SmartRepo" / "docs"
@@ -10,17 +11,36 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def clean_markdown(content: str) -> str:
-    """Remove chart labels, axis text, and other short garbage lines."""
+    """Remove chart junk but preserve useful metadata/header lines."""
+    content = normalize_text(content)
+
+    keep_prefixes = (
+        "Company:",
+        "Drug:",
+        "Date:",
+        "Publication Date:",
+        "Indication:",
+        "Source:",
+    )
+
     clean_lines = []
     for line in content.splitlines():
         stripped = line.strip()
         if not stripped:
             continue
-        words = [w for w in stripped.split() if w.isalpha() and len(w) > 2]
-        if len(stripped) >= 40 and len(words) >= 5:
-            clean_lines.append(line)
-    return "\n".join(clean_lines)
 
+        # Always preserve useful metadata lines
+        if stripped.startswith(keep_prefixes):
+            clean_lines.append(stripped)
+            continue
+
+        words = [w for w in stripped.split() if w.isalpha() and len(w) > 2]
+
+        # Keep longer meaningful lines
+        if len(stripped) >= 40 and len(words) >= 5:
+            clean_lines.append(stripped)
+
+    return "\n".join(clean_lines)
 
 def run_smart_parser(pdf_path):
     print(f"--- Starting Smart Parse on: {pdf_path} ---")
