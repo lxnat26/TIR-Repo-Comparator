@@ -222,10 +222,6 @@ function shortTitle(text: string): string {
   return text.slice(0, 62).replace(/\s+\S*$/, '') + '...'
 }
 
-function hasHistory(claim: ClaimResult): boolean {
-  const h = claim.historical_claim?.trim()
-  return !!h && h !== 'No historical matches found'
-}
 
 function ClaimCard({
   claim, active, setRef, onCardClick,
@@ -236,9 +232,7 @@ function ClaimCard({
   onCardClick: (id: string) => void
 }) {
   const pal = PALETTE[claim.claim_type] ?? PALETTE.milestone
-  const showHistory = hasHistory(claim)
-
-  const [expanded, setExpanded]   = useState(false)
+const [expanded, setExpanded]   = useState(false)
   const [overflows, setOverflows] = useState(false)
   const [copied, setCopied]       = useState(false)
   const histRef  = useRef<HTMLParagraphElement>(null)
@@ -296,7 +290,7 @@ function ClaimCard({
 
       {/* ── Comparison box ── */}
       <div className="cc-compare">
-        {showHistory ? (
+        {claim.classification === 'refined_detail' ? (
           <>
             <div className="cc-compare-grid">
               <div className="cc-compare-col">
@@ -317,18 +311,43 @@ function ClaimCard({
             </div>
             {overflows && (
               <div style={{ padding: '4px 14px 10px' }}>
-                <button
-                  className="cc-see-more"
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); setExpanded(v => !v) }}
-                >
+                <button className="cc-see-more" type="button"
+                  onClick={(e) => { e.stopPropagation(); setExpanded(v => !v) }}>
                   {expanded ? 'See less ↑' : 'See more ↓'}
                 </button>
               </div>
             )}
           </>
+        ) : claim.classification === 'already_reported' ? (
+          <div className="cc-compare-col" style={{ width: '100%' }}>
+            <p className="cc-compare-heading">Previously reported:</p>
+            <CollapsedText text={claim.historical_claim} quoted expanded={expanded} pRef={histRef} />
+            {claim.report_date && (
+              <p className="cc-compare-source">From Historical DB · {claim.report_date}</p>
+            )}
+            <button className="cc-copy-btn" type="button" onClick={copyHistorical}>
+              <IconCopy />
+              {copied ? 'Copied ✓' : 'Copy Text'}
+            </button>
+            {overflows && (
+              <button className="cc-see-more" type="button"
+                onClick={(e) => { e.stopPropagation(); setExpanded(v => !v) }}>
+                {expanded ? 'See less ↑' : 'See more ↓'}
+              </button>
+            )}
+          </div>
         ) : (
-          <p className="cc-compare-new">This information was not in previous reports.</p>
+          /* new_information */
+          <div className="cc-compare-col" style={{ width: '100%' }}>
+            <p className="cc-compare-heading">What's new</p>
+            <CollapsedText text={claim.claim} expanded={expanded} pRef={claimRef} />
+            {overflows && (
+              <button className="cc-see-more" type="button"
+                onClick={(e) => { e.stopPropagation(); setExpanded(v => !v) }}>
+                {expanded ? 'See less ↑' : 'See more ↓'}
+              </button>
+            )}
+          </div>
         )}
       </div>
 

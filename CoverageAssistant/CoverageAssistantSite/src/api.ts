@@ -67,7 +67,7 @@ function _mapClaim(c: Record<string, string>, i: number): ClaimResult {
     claim_type:       _VALID_TYPES.includes(c.claim_type as ClaimType) ? (c.claim_type as ClaimType) : 'milestone',
     specific_type:    c.specific_type ?? '',
     claim:            c.claim ?? '',
-    historical_claim: c.historical_claim ?? '',
+    historical_claim: c.historical_claim ?? c.historical_match ?? '',
     report_date:      _formatDate(c.report_date ?? ''),
     classification:   _STATUS_MAP[c.classification] ?? 'already_reported',
     reason:           c.reason ?? '',
@@ -75,7 +75,9 @@ function _mapClaim(c: Record<string, string>, i: number): ClaimResult {
 }
 
 function _mapResponse(data: Record<string, unknown>): AnalysisResult {
-  const raw = (data.claims as Record<string, string>[] | undefined) ?? []
+  const raw = Array.isArray(data)
+    ? (data as Record<string, string>[])
+    : ((data.claims as Record<string, string>[] | undefined) ?? [])
   const claims = raw.map(_mapClaim)
   return {
     claim_count:   claims.length,
