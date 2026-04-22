@@ -1,0 +1,130 @@
+claim_extractor_task:
+  description: >
+    Extract sentences containing clinical, efficacy, safety, or milestone information 
+    from the following report. Ignore filler, background, and non-claim content. 
+    Return ONLY valid JSON.
+    No markdown.
+    No commentary.
+    No additional keys.
+    Output must match schema exactly. 
+
+    Claim type definitions:
+    - 'milestone': trial phase initiation or completion, FDA submission, FDA approval, drug approval, data release, enrollment updates, regulatory decisions, marketing authorization
+    - 'efficacy': how well the drug works — response rates, clinical improvement scores, endpoint results, comparative effectiveness data
+    - 'safety': side effects, tolerability, adverse events, grade events, discontinuation rates due to adverse effects
+  
+    'claim_type' MUST be 'milestone', 'efficacy', 'safety'
+    'claim_type' MUST have only one of those types: 'milestone', 'efficacy', 'safety'
+    If a sentence cannot be clearly classified as 'milestone', 'efficacy', or 'safety',
+    do not include it in the output.
+
+    'specific_type' rules:
+    - Applies ONLY when claim_type is 'milestone'. For 'efficacy' or 'safety', specific_type MUST be "".
+    - When claim_type is 'milestone', specific_type MUST be exactly one of:
+        "drug approval"  — the drug has received marketing authorization from a regulator
+        "fda"            — any FDA-related action, submission, decision, or communication
+        "data release"   — clinical trial data, readouts, results, or data publication
+      If the milestone claim does not clearly map to one of the above, specific_type MUST be "".
+    - specific_type is case-sensitive and must be a literal string from the allowed set or "".
+
+    'claim' text rules — verbatim:
+    - The 'claim' string MUST be a word-for-word copy of a sentence.
+      from the REPORT. Copy every word exactly as it appears.
+    - Do NOT paraphrase. Do NOT summarize. Do NOT shorten. Do NOT merge multiple sentences
+      into new wording. Do NOT remove adjectives or qualifiers.
+    - If the REPORT does not name a specific drug in its header/metadata, do NOT substitute
+      anything — copy the sentence verbatim.
+    - Do NOT invent drug or company names. Only use names that appear in the REPORT.
+
+    REPORT:
+    {text}
+
+    Do not include any prefix, explanation, or commentary. Return ONLY the JSON object.
+  expected_output: |
+    {
+      "claims": [
+        {
+          "claim_type": "milestone | efficacy | safety",
+          "specific_type": "drug approval | fda | data release | "",
+          "claim": "string"
+        }
+      ]
+    }
+  agent: claim_extractor
+
+claim_comparator_task:
+  description: >
+    You are given a list of clinical claims, each already paired with its historical
+    match retrieved from the database. The data is provided below.
+
+    CLAIMS WITH HISTORICAL MATCHES:
+    {enriched_claims}
+
+    For EACH item in the list:
+    - The output key for the claim text MUST be "claim" (not "claim_txt" or any other variation)
+    - Copy "specific_type" VERBATIM from the input item into your output object. Do not reinterpret or change it.
+    - Use "historical_match" as the historical_match value
+    - Determine what_changed, what_is_same, and whether there is a contradiction
+    - If "historical_match" is "No historical matches found", set all comparison
+      fields to "N/A" and contradiction to false
+
+    Collect all results into a single JSON ARRAY — one object per input item.
+    Return ONLY valid JSON. No markdown. No commentary. No additional keys.
+  expected_output: |
+    [
+      {
+        "claim_type": "milestone | efficacy | safety",
+        "specific_type": "drug approval | fda | data release | "",
+        "claim": "string - the new claim text",
+        "historical_match": "string",
+        "what_changed": "string",
+        "what_is_same": "string",
+        "contradiction": false
+      }
+    ]
+  agent: claim_comparator
+
+claim_classifier_task:
+  description: >
+    IMPORTANT: Only reference facts explicitly present in the claim text 
+    and historical match text. Do not infer or introduce phase numbers, 
+    percentages, or clinical details not stated in the provided text.
+    Receive the comparator agent output, which is a JSON ARRAY of comparison objects.
+
+    For EACH object in the array, classify the claim using these rules:
+    Classification rules:
+    - 'Already Reported': claim and historical match describe the exact same finding with no new details, drug name substitutes are considered 'Already Reported'. — analyst can copy previous text directly
+    - 'Refined Detail': claim describes the same topic as the historical match but with changed or additional specifics — same drug/trial but different numbers, updated phase, or added context. Analyst needs to revise previous text.
+    - 'New Information': historical_match is "No historical matches found" OR the claim describes a completely different topic with no overlap to the historical match. Analyst must write this from scratch.
+
+    IMPORTANT: If historical_match is "No historical matches found", classification MUST be 'New Information'.
+    IMPORTANT: 'Refined Detail' requires a meaningful historical match on the SAME topic. If the historical match is about a different subject entirely, use 'New Information' instead.
+    IMPORTANT: Do NOT use 'Contradiction' or 'Uncertain' — every claim must be 'Already Reported', 'Refined Detail', or 'New Information'.
+    IMPORTANT: Copy "specific_type" VERBATIM from each comparator output object into your output object. Do not alter it.
+
+    Always provide a specific reason explaining your classification for each claim.
+    When writing the reason:
+     - For milestone claims: always describe the development stage explicitly. 
+        State what stage was previously reported and what stage is now being reported. 
+        Mention if it does have fda, drug approval, or data release if applicable.
+      - Always write reason as if explaining to an analyst who needs to quickly understand 
+    whether action is needed. Write the reason as a clear, concise explanation for a pharmaceutical analyst.
+      - It should explain what was found in prior reports and why this classification was chosen.
+    Do not reference field names like 'historical_match' or 'what_changed' — explain the finding in plain language.
+    
+    Return ONLY a valid JSON ARRAY — one classification object per input comparison object.
+    No markdown. No commentary. No additional keys.
+    Output must match schema exactly.
+  expected_output: |
+    [
+      {
+        "claim_type": "milestone | efficacy | safety",
+        "specific_type": "drug approval | fda | data release | "",
+        "claim": "string - copy the exact claim text from comparator input",
+        "historical_claim": "string - exact historical match text",
+        "classification": "Already Reported | Refined Detail | New Information",
+        "reason": "string - plain language explanation for analyst"
+      }
+    ]
+  agent: claim_classifier
+
