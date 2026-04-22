@@ -65,12 +65,13 @@ class QueryDBTool(BaseTool):
         )
         return best
 
-    def _run(
+    def search_with_metadata(
         self,
         claim_text: str,
         drug_name: Optional[str] = None,
         company_name: Optional[str] = None,
-    ) -> str:
+    ) -> dict:
+
         print(f"CALLING QueryDBTool WITH:\n  claim  : {claim_text}")
         if drug_name:
             print(f"  drug   : {drug_name}")
@@ -78,7 +79,6 @@ class QueryDBTool(BaseTool):
             print(f"  company: {company_name}")
 
         try:
-
             embeddings = OllamaEmbeddings(model="nomic-embed-text")
             vector_store = Chroma(
                 collection_name=COLLECTION_NAME,
@@ -121,7 +121,8 @@ class QueryDBTool(BaseTool):
                     print(f"  metadata filter: {chroma_filter}")
                 else:
                     print("  no metadata matched drug/company keywords; using full collection")
-            docs = []
+
+            winner = None
             attempts = [chroma_filter, None] if chroma_filter else [None]
 
             for attempt_filter in attempts:
@@ -131,17 +132,28 @@ class QueryDBTool(BaseTool):
                 )
                 if results:
                     print(f"  query returned {len(results)} results with: {label}")
-                    docs = [doc.page_content for doc in results]
+                    winner = results[0]
                     break
                 else:
                     print(f"  query empty with: {label}; trying next fallback")
 
-            if not docs:
-                return "No historical matches found"
+            if winner is None:
+                return {"text": "No historical matches found", "report_date": "Unknown"}
 
-            best_sentence = self._extract_best_sentence(docs[0], claim_text)
+            best_sentence = self._extract_best_sentence(winner.page_content, claim_text)
+            report_date = winner.metadata.get("report_date", "Unknown") if winner.metadata else "Unknown"
             print(f"  returning: {best_sentence}")
-            return best_sentence
+            print(f"  report_date: {report_date}")
+            return {"text": best_sentence, "report_date": report_date}
 
         except Exception as e:
-            return f"Error querying ChromaDB: {str(e)}"
+            return {"text": f"Error querying ChromaDB: {str(e)}", "report_date": "Unknown"}
+
+    def _run(
+        self,
+        claim_text: str,
+        drug_name: Optional[str] = None,
+        company_name: Optional[str] = None,
+    ) -> str:
+        """CrewAI BaseTool contract — must return a string (agent observation)."""
+        return self.search_with_metadata(claim_text, drug_name, company_name)["text"]

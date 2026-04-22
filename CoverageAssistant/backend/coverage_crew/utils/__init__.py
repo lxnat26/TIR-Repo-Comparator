@@ -1,6 +1,7 @@
 from .helpers import (
     VALID_CLAIM_TYPES,
     VALID_CLASSIFICATIONS,
+    VALID_SPECIFIC_TYPES,
     extract_metadata_from_filename,
     parse_model_json,
     sanitize_for_ui,
@@ -9,6 +10,7 @@ from .helpers import (
 __all__ = [
     "VALID_CLAIM_TYPES",
     "VALID_CLASSIFICATIONS",
+    "VALID_SPECIFIC_TYPES",
     "extract_metadata_from_filename",
     "parse_model_json",
     "sanitize_for_ui",
