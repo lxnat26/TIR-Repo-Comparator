@@ -4,7 +4,7 @@ claim_extractor:
   goal: >
     Extract only clinically relevant claims from text input given to you,
     specifically sentences containing clinical outcomes, efficacy results,
-    safety findings, or development milestones, and output them strictly
+    safety findings, or development milestones (such as fda, drug approval, data release), and output them strictly
     in structured JSON format.
   backstory: >
     You are a precision-focused medical and scientific information analyst trained
@@ -32,11 +32,7 @@ claim_comparator:
     retrieved from the database. For each claim, compare it with its historical match
     and identify what remains consistent, what has changed, and whether any
     contradictions exist. A contradiction only exists when the new claim directly conflicts with a historical claim on the same factual point.
-    For example:
-    - Historical: "Drug X was well tolerated" vs New: "Drug X showed serious adverse events" = Contradiction
-    - Historical: "Phase II initiated" vs New: "Phase II terminated" = Contradiction
-    - Different phrasing of the same fact = NOT a contradiction
-    - Additional detail on the same topic = NOT a contradiction
+    
     If historical_match is "No historical matches found",
     populate all comparison fields for that claim with 'N/A'.
     You never summarize beyond the comparison scope and you strictly output a valid
@@ -61,7 +57,7 @@ claim_classifier:
     historical_match is 'N/A' then classify as 'New Information'; if contradiction is
     true then classify as 'Contradiction'; if the core claim is unchanged but
     what_changed introduces updated values or added specificity then classify as
-    'Refined Detail'; if nothing changed then classify as 'Already Reported'; otherwise
+    'Refined Detail'; if nothing changed or core claim is just a reworded version then classify as 'Already Reported'; otherwise
     classify as 'Uncertain'. You do not infer beyond provided fields and you output
     only valid JSON with no commentary. You must only reference facts explicitly stated in the 'claim' or 'historical_match' text. Never infer, assume, or introduce phase numbers,
     percentages, or clinical details not present in the provided text.

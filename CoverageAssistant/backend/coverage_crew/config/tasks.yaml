@@ -27,33 +27,14 @@ claim_extractor_task:
       If the milestone claim does not clearly map to one of the above, specific_type MUST be "".
     - specific_type is case-sensitive and must be a literal string from the allowed set or "".
 
-    'claim' text rules — verbatim with ONE allowed substitution:
-    - The 'claim' string MUST be a word-for-word copy of a sentence (or two joined sentences)
+    'claim' text rules — verbatim:
+    - The 'claim' string MUST be a word-for-word copy of a sentence.
       from the REPORT. Copy every word exactly as it appears.
     - Do NOT paraphrase. Do NOT summarize. Do NOT shorten. Do NOT merge multiple sentences
-      into new wording. Do NOT remove adjectives or qualifiers such as "encouraging",
-      "promising", "favorable", "significant". Do NOT change tense or voice.
-    - The ONLY allowed modification is substituting a generic reference or pronoun with the
-      drug name drawn from the REPORT header. Allowed substitutions (and ONLY these):
-        "the therapy"   -> "<drug name>"
-        "the drug"      -> "<drug name>"
-        "the treatment" -> "<drug name>"
-        "the biologic"  -> "<drug name>"
-        "it" / "this"   -> "<drug name>"  (only when unambiguously referring to the drug)
-        "the results"   -> "<drug name>'s results"  (only when the results described are for the drug)
-      Every other word in the sentence MUST remain identical to the source.
+      into new wording. Do NOT remove adjectives or qualifiers.
     - If the REPORT does not name a specific drug in its header/metadata, do NOT substitute
       anything — copy the sentence verbatim.
     - Do NOT invent drug or company names. Only use names that appear in the REPORT.
-    - Example (source: "Eli Lilly reported encouraging Phase II results for lebrikizumab..."):
-        CORRECT claim: "Eli Lilly reported encouraging Phase II results for lebrikizumab..."
-        WRONG   claim (dropped adjective):
-          "Eli Lilly reported Phase II results for lebrikizumab..."
-    - Example (source: "The therapy showed improvements in eczema severity scores...",
-      header names "Lebrikizumab"):
-        CORRECT claim: "Lebrikizumab showed improvements in eczema severity scores..."
-        WRONG   claim (paraphrased):
-          "Lebrikizumab improved eczema severity."
 
     REPORT:
     {text}
@@ -64,7 +45,7 @@ claim_extractor_task:
       "claims": [
         {
           "claim_type": "milestone | efficacy | safety",
-          "specific_type": "drug approval | fda | data release | \"\"",
+          "specific_type": "drug approval | fda | data release | "",
           "claim": "string"
         }
       ]
@@ -93,7 +74,7 @@ claim_comparator_task:
     [
       {
         "claim_type": "milestone | efficacy | safety",
-        "specific_type": "drug approval | fda | data release | \"\"",
+        "specific_type": "drug approval | fda | data release | "",
         "claim": "string - the new claim text",
         "historical_match": "string",
         "what_changed": "string",
@@ -109,12 +90,12 @@ claim_classifier_task:
     and historical match text. Do not infer or introduce phase numbers, 
     percentages, or clinical details not stated in the provided text.
     Receive the comparator agent output, which is a JSON ARRAY of comparison objects.
-    For EACH object in the array, classify the claim using these rules:
 
+    For EACH object in the array, classify the claim using these rules:
     Classification rules:
-    - 'Already Reported': claim and historical match describe the exact same finding with no new details — analyst can copy previous text directly
+    - 'Already Reported': claim and historical match describe the exact same finding with no new details, drug name substitutes are considered 'Already Reported'. — analyst can copy previous text directly
     - 'Refined Detail': claim describes the same topic as the historical match but with changed or additional specifics — same drug/trial but different numbers, updated phase, or added context. Analyst needs to revise previous text.
-    - 'New Information': historical_match is "No historical matches found" OR the claim describes a completely different topic with no overlap to the historical match — analyst must write this from scratch
+    - 'New Information': historical_match is "No historical matches found" OR the claim describes a completely different topic with no overlap to the historical match. Analyst must write this from scratch.
 
     IMPORTANT: If historical_match is "No historical matches found", classification MUST be 'New Information'.
     IMPORTANT: 'Refined Detail' requires a meaningful historical match on the SAME topic. If the historical match is about a different subject entirely, use 'New Information' instead.
@@ -124,21 +105,13 @@ claim_classifier_task:
     Always provide a specific reason explaining your classification for each claim.
     When writing the reason:
      - For milestone claims: always describe the development stage explicitly. 
-    State what stage was previously reported and what stage is now being reported.
-    Example: 'Previously reported as Phase II initiation. Now reporting Phase III 
-    progression for lebrikizumab in atopic dermatitis.'
-     - For efficacy claims: describe what metric or outcome changed or stayed the same.
-    Example: 'Efficacy results for lebrikizumab remain consistent with prior reports 
-    showing improvements in eczema severity scores.'
-    - For safety claims: describe what safety signal was reported and whether it is 
-    new or consistent with prior reports.
-    Example: 'Safety profile remains favorable, consistent with previously reported 
-    tolerability data.'
-    - Always write as if explaining to an analyst who needs to quickly understand 
-    whether action is needed.
-    Write the reason as a clear, concise explanation for a pharmaceutical analyst.
-    It should explain what was found in prior reports and why this classification was chosen.
+        State what stage was previously reported and what stage is now being reported. 
+        Mention if it does have fda, drug approval, or data release if applicable.
+      - Always write reason as if explaining to an analyst who needs to quickly understand 
+    whether action is needed. Write the reason as a clear, concise explanation for a pharmaceutical analyst.
+      - It should explain what was found in prior reports and why this classification was chosen.
     Do not reference field names like 'historical_match' or 'what_changed' — explain the finding in plain language.
+    
     Return ONLY a valid JSON ARRAY — one classification object per input comparison object.
     No markdown. No commentary. No additional keys.
     Output must match schema exactly.
@@ -146,7 +119,7 @@ claim_classifier_task:
     [
       {
         "claim_type": "milestone | efficacy | safety",
-        "specific_type": "drug approval | fda | data release | \"\"",
+        "specific_type": "drug approval | fda | data release | "",
         "claim": "string - copy the exact claim text from comparator input",
         "historical_claim": "string - exact historical match text",
         "classification": "Already Reported | Refined Detail | New Information",
