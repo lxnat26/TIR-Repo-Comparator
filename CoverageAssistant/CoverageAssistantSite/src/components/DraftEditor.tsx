@@ -435,9 +435,14 @@ export function DraftEditor({
     setResult(null)
     setActiveId(null)
     try {
-      const res = await analyzeDocument(f)
-      setDraftText(res.document_text ?? '')
-      setResult(res)
+      // Step 1: extract text from the PDF (same as landing page)
+      const extracted = await analyzeDocument(f)
+      const text = extracted.document_text ?? ''
+      setDraftText(text)
+
+      // Step 2: run analysis on the extracted text via /api/analyze (same endpoint as landing page)
+      const analysisRes = await analyzeDraft({ text })
+      setResult(analysisRes)
       setEditMode(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed.')
