@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { analyzeDraft, analyzeDocument } from '../api'
-import type { AnalysisResult, ClaimResult, ClaimCategory, ClaimStatus } from '../api'
+import type { AnalysisResult, ClaimResult, ClaimType, ClaimStatus } from '../api'
 
 const ACCEPTED_MIME = new Set([
   'application/pdf',
@@ -8,79 +8,220 @@ const ACCEPTED_MIME = new Set([
   'application/msword',
 ])
 
-const CATEGORY_LABEL: Record<ClaimCategory, string> = {
+// ─── Per-type color palette ───────────────────────────────────────────────────
+
+const PALETTE: Record<ClaimType, { primary: string; bg: string; boxBg: string; border: string }> = {
+  milestone: { primary: '#c0392b', bg: 'rgba(192,57,43,0.04)',  boxBg: 'rgba(192,57,43,0.09)',  border: 'rgba(192,57,43,0.22)' },
+  efficacy:  { primary: '#27ae60', bg: 'rgba(39,174,96,0.04)',  boxBg: 'rgba(39,174,96,0.09)',  border: 'rgba(39,174,96,0.22)'  },
+  safety:    { primary: '#8a7300', bg: 'rgba(138,115,0,0.04)',  boxBg: 'rgba(138,115,0,0.09)',  border: 'rgba(138,115,0,0.22)'  },
+}
+
+const TYPE_LABEL: Record<ClaimType, string> = {
   milestone: 'Milestone',
-  efficacy: 'Efficacy',
-  safety: 'Safety',
-  regulatory: 'Regulatory',
-  other: 'Other',
+  efficacy:  'Efficacy',
+  safety:    'Safety',
 }
 
 const STATUS_LABEL: Record<ClaimStatus, string> = {
-  new_information: 'New Information',
-  refined_detail: 'Refined Detail',
-  already_reported: 'Previously Reported',
-  contradiction: 'Contradiction',
-  uncertainty: 'Uncertainty',
+  new_information:  'New',
+  refined_detail:   'Refined Detail',
+  already_reported: 'Already Reported',
 }
 
-function ClaimCard({ claim }: { claim: ClaimResult }) {
+// ─── Icons ────────────────────────────────────────────────────────────────────
+
+function IconCheck() {
   return (
-    <div className={`claim-card claim-card--${claim.status}`}>
-      <div className="claim-card-header">
-        <span className={`badge badge--category badge--cat-${claim.category}`}>
-          {CATEGORY_LABEL[claim.category]}
-        </span>
-        <span className={`badge badge--status badge--${claim.status}`}>
-          {claim.status === 'new_information' && (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
+}
+
+function IconRefresh() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="1 4 1 10 7 10" />
+      <path d="M3.51 15a9 9 0 1 0 .49-3.51" />
+    </svg>
+  )
+}
+
+function IconLightbulb({ color }: { color: string }) {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, marginTop: 1 }}>
+      <line x1="9" y1="18" x2="15" y2="18" />
+      <line x1="10" y1="22" x2="14" y2="22" />
+      <path d="M15.09 14c.18-.98.65-1.74 1.41-2.5A4.65 4.65 0 0 0 18 8 6 6 0 0 0 6 8c0 1 .23 2.23 1.5 3.5A4.61 4.61 0 0 1 8.91 14" />
+    </svg>
+  )
+}
+
+function IconCopy() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  )
+}
+
+// ─── Highlight helpers ────────────────────────────────────────────────────────
+
+type Segment = { text: string; claimId?: string }
+
+function buildSegments(docText: string, claims: ClaimResult[]): Segment[] {
+  const hits: { start: number; end: number; claimId: string }[] = []
+
+  for (const claim of claims) {
+    const phrase = claim.claim?.slice(0, 80)
+    if (!phrase || phrase.length < 15) continue
+    const idx = docText.indexOf(phrase)
+    if (idx !== -1) hits.push({ start: idx, end: idx + phrase.length, claimId: claim.id })
+  }
+
+  hits.sort((a, b) => a.start - b.start)
+  const merged: typeof hits = []
+  for (const h of hits) {
+    if (!merged.length || h.start >= merged[merged.length - 1].end) merged.push(h)
+  }
+
+  const segs: Segment[] = []
+  let cursor = 0
+  for (const { start, end, claimId } of merged) {
+    if (cursor < start) segs.push({ text: docText.slice(cursor, start) })
+    segs.push({ text: docText.slice(start, end), claimId })
+    cursor = end
+  }
+  if (cursor < docText.length) segs.push({ text: docText.slice(cursor) })
+  return segs
+}
+
+// ─── DocumentView ─────────────────────────────────────────────────────────────
+
+function DocumentView({
+  text, claims, activeId, onPhraseClick,
+}: {
+  text: string; claims: ClaimResult[]; activeId: string | null; onPhraseClick: (id: string) => void
+}) {
+  const segments = buildSegments(text, claims)
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.claimId ? (
+          <mark
+            key={i}
+            className={`doc-highlight${seg.claimId === activeId ? ' doc-highlight--active' : ''}`}
+            onClick={() => onPhraseClick(seg.claimId!)}
+          >
+            {seg.text}
+          </mark>
+        ) : (
+          <span key={i}>{seg.text}</span>
+        )
+      )}
+    </>
+  )
+}
+
+// ─── ClaimCard ────────────────────────────────────────────────────────────────
+
+function shortTitle(text: string): string {
+  if (text.length <= 62) return text
+  return text.slice(0, 62).replace(/\s+\S*$/, '') + '...'
+}
+
+function hasHistory(claim: ClaimResult): boolean {
+  const h = claim.historical_claim?.trim()
+  return !!h && h !== 'No historical matches found'
+}
+
+function ClaimCard({
+  claim, active, setRef,
+}: {
+  claim: ClaimResult
+  active: boolean
+  setRef: (el: HTMLDivElement | null) => void
+}) {
+  const pal = PALETTE[claim.claim_type] ?? PALETTE.milestone
+  const showHistory = hasHistory(claim)
+
+  function copyText() {
+    navigator.clipboard.writeText(claim.claim).catch(() => {})
+  }
+
+  return (
+    <div
+      ref={setRef}
+      className={`cc${active ? ' cc--active' : ''}`}
+      style={{
+        '--cc-primary': pal.primary,
+        '--cc-bg':      pal.bg,
+        '--cc-box-bg':  pal.boxBg,
+        '--cc-border':  pal.border,
+      } as React.CSSProperties}
+    >
+      {/* ── Badge row ── */}
+      <div className="cc-header">
+        <div className="cc-badges-left">
+          <span className="cc-badge cc-badge--type">
+            <span className="cc-dot" />
+            {TYPE_LABEL[claim.claim_type].toUpperCase()}
+          </span>
+          {claim.specific_type && (
+            <span className="cc-badge cc-badge--type">
+              <span className="cc-dot" />
+              {claim.specific_type.toUpperCase()}
+            </span>
           )}
-          {claim.status === 'refined_detail' && (
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <polyline points="1 4 1 10 7 10" />
-              <path d="M3.51 15a9 9 0 1 0 .49-3.51" />
-            </svg>
-          )}
-          {STATUS_LABEL[claim.status]}
+        </div>
+        <span className="cc-badge cc-badge--status">
+          {claim.classification === 'new_information'  && <IconCheck />}
+          {claim.classification === 'refined_detail'   && <IconRefresh />}
+          {STATUS_LABEL[claim.classification]}
         </span>
       </div>
 
-      <h3 className="claim-card-title">{claim.title}</h3>
+      {/* ── Title ── */}
+      <h3 className="cc-title">{shortTitle(claim.claim)}</h3>
 
-      {claim.previously_reported ? (
-        <div className="claim-comparison">
-          <div className="claim-col">
-            <p className="claim-col-label">Previously Reported</p>
-            <p className="claim-col-date">{claim.previously_reported.date}</p>
-            <p className="claim-col-source">{claim.previously_reported.source}</p>
-            <p className="claim-col-text">{claim.previously_reported.summary}</p>
+      {/* ── Comparison box ── */}
+      <div className="cc-compare">
+        {showHistory ? (
+          <div className="cc-compare-grid">
+            <div className="cc-compare-col">
+              <p className="cc-compare-heading">Previously reported:</p>
+              <p className="cc-compare-body">"{claim.historical_claim}"</p>
+              {claim.report_date && (
+                <p className="cc-compare-source">From Historical DB · {claim.report_date}</p>
+              )}
+            </div>
+            <div className="cc-compare-col cc-compare-col--right">
+              <p className="cc-compare-heading">What's new</p>
+              <p className="cc-compare-body">{claim.claim}</p>
+              <button className="cc-copy-btn" onClick={copyText} type="button">
+                <IconCopy />
+                Copy Text
+              </button>
+            </div>
           </div>
-          <div className="claim-col">
-            <p className="claim-col-label">
-              {claim.status === 'refined_detail' ? 'Updated' : "What's New"}
-            </p>
-            <p className="claim-col-text">{claim.whats_new}</p>
-          </div>
-        </div>
-      ) : (
-        claim.whats_new && <p className="claim-body">{claim.whats_new}</p>
-      )}
+        ) : (
+          <p className="cc-compare-new">This information was not in previous reports.</p>
+        )}
+      </div>
 
-      <div className="claim-why">
-        <svg className="claim-why-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-          <circle cx="12" cy="12" r="10" />
-          <line x1="12" y1="16" x2="12" y2="12" />
-          <line x1="12" y1="8" x2="12.01" y2="8" />
-        </svg>
-        <p className="claim-why-text">
-          <strong>Why it matters:</strong> {claim.why_it_matters}
+      {/* ── Why it matters ── */}
+      <div className="cc-why">
+        <IconLightbulb color={pal.primary} />
+        <p className="cc-why-text">
+          <strong>Why it matters: </strong>{claim.reason}
         </p>
       </div>
     </div>
   )
 }
+
+// ─── Panel states ─────────────────────────────────────────────────────────────
 
 function PanelEmpty() {
   return (
@@ -90,12 +231,9 @@ function PanelEmpty() {
         <polyline points="14 2 14 8 20 8" />
         <line x1="16" y1="13" x2="8" y2="13" />
         <line x1="16" y1="17" x2="8" y2="17" />
-        <polyline points="10 9 9 9 8 9" />
       </svg>
       <p className="panel-empty-title">No analysis yet</p>
-      <p className="panel-empty-body">
-        Click Analyze Draft to see how each claim compares against the report library.
-      </p>
+      <p className="panel-empty-body">Upload a report and click Analyze Draft.</p>
     </div>
   )
 }
@@ -109,15 +247,33 @@ function PanelLoading() {
   )
 }
 
-export function DraftEditor({ initialText = '', initialResult = null }: { initialText?: string, initialResult?: AnalysisResult | null }) {
-  const [draftText, setDraftText] = useState(initialText)
-  const [result, setResult] = useState<AnalysisResult | null>(initialResult)
-  const [loading, setLoading] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+// ─── DraftEditor ──────────────────────────────────────────────────────────────
+
+export function DraftEditor({
+  initialText = '',
+  initialResult = null,
+}: {
+  initialText?: string
+  initialResult?: AnalysisResult | null
+}) {
+  const [draftText, setDraftText]         = useState(initialText)
+  const [result, setResult]               = useState<AnalysisResult | null>(initialResult)
+  const [loading, setLoading]             = useState(false)
+  const [uploading, setUploading]         = useState(false)
+  const [error, setError]                 = useState<string | null>(null)
+  const [activeId, setActiveId]           = useState<string | null>(null)
+
   const inputRef = useRef<HTMLInputElement>(null)
+  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({})
 
   const wordCount = draftText.trim() === '' ? 0 : draftText.trim().split(/\s+/).length
+  const pendingCount = result?.claims.length ?? 0
+
+  const navigateToCard = useCallback((id: string) => {
+    setActiveId(id)
+    const el = cardRefs.current[id]
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [])
 
   async function handleNewFile(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0]
@@ -126,17 +282,13 @@ export function DraftEditor({ initialText = '', initialResult = null }: { initia
     setUploading(true)
     setError(null)
     setResult(null)
+    setActiveId(null)
     try {
-      // Step 1: extract text
-      const extractRes = await analyzeDocument(f)
-      const text = extractRes.document_text ?? ''
-      setDraftText(text)
-
-      // Step 2: automatically run analysis
-      const analysisRes = await analyzeDraft({ text })
-      setResult(analysisRes)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Upload failed.')
+      const res = await analyzeDocument(f)
+      setDraftText(res.document_text ?? '')
+      setResult(res)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed.')
     } finally {
       setUploading(false)
     }
@@ -146,11 +298,12 @@ export function DraftEditor({ initialText = '', initialResult = null }: { initia
     if (!draftText.trim()) return
     setLoading(true)
     setError(null)
+    setActiveId(null)
     try {
       const res = await analyzeDraft({ text: draftText })
       setResult(res)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Analysis failed. Is the backend running?')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Analysis failed. Is the backend running?')
     } finally {
       setLoading(false)
     }
@@ -168,38 +321,36 @@ export function DraftEditor({ initialText = '', initialResult = null }: { initia
             </svg>
             <h2 className="editor-panel-title">Draft Report</h2>
           </div>
-
           <div className="editor-header-actions">
-            <input
-              ref={inputRef}
-              type="file"
-              accept=".pdf,.docx,.doc"
-              onChange={handleNewFile}
-              style={{ display: 'none' }}
-            />
-            <button
-              className="btn btn-ghost btn-sm"
-              onClick={() => inputRef.current?.click()}
-              disabled={uploading}
-            >
+            <input ref={inputRef} type="file" accept=".pdf,.docx,.doc" onChange={handleNewFile} style={{ display: 'none' }} />
+            <button className="btn btn-ghost btn-sm" onClick={() => inputRef.current?.click()} disabled={uploading || loading}>
               {uploading ? 'Uploading...' : 'Upload New Draft'}
             </button>
-            <button
-              className="btn btn-primary"
-              onClick={handleAnalyze}
-              disabled={loading || !draftText.trim()}
-            >
+            <button className="btn btn-primary" onClick={handleAnalyze} disabled={loading || uploading || !draftText.trim()}>
               {loading ? 'Analyzing...' : 'Analyze Draft'}
             </button>
           </div>
         </div>
 
-        <textarea
-          className="editor-textarea"
-          value={draftText}
-          onChange={(e) => setDraftText(e.target.value)}
-          spellCheck
-        />
+        <div className="editor-content-area">
+          {result ? (
+            <div className="editor-doc-text">
+              <DocumentView
+                text={draftText}
+                claims={result.claims}
+                activeId={activeId}
+                onPhraseClick={navigateToCard}
+              />
+            </div>
+          ) : (
+            <textarea
+              className="editor-textarea"
+              value={draftText}
+              onChange={(e) => setDraftText(e.target.value)}
+              spellCheck
+            />
+          )}
+        </div>
 
         <div className="editor-footer">
           <span className="editor-wordcount">{wordCount} words</span>
@@ -222,28 +373,29 @@ export function DraftEditor({ initialText = '', initialResult = null }: { initia
               )}
             </div>
           </div>
-          {result && (
-            <span className="badge badge--count">
-              {result.claim_count} update{result.claim_count !== 1 ? 's' : ''} found
-            </span>
+          {result && pendingCount > 0 && (
+            <span className="badge badge--count">{pendingCount} pending</span>
           )}
         </div>
 
         <div className="coverage-panel">
           {error && <div className="panel-error">{error}</div>}
-          {!error && !result && !loading && <PanelEmpty />}
-          {!error && loading && <PanelLoading />}
-          {!error && !loading && result && (
+          {!error && !result && !loading && !uploading && <PanelEmpty />}
+          {!error && (loading || uploading) && <PanelLoading />}
+          {!error && !loading && !uploading && result && (
             result.claims.length === 0 ? (
               <div className="panel-empty">
                 <p className="panel-empty-title">No claims detected</p>
-                <p className="panel-empty-body">
-                  The backend did not return any comparable claims.
-                </p>
+                <p className="panel-empty-body">The backend did not return any comparable claims.</p>
               </div>
             ) : (
               result.claims.map((claim) => (
-                <ClaimCard key={claim.id} claim={claim} />
+                <ClaimCard
+                  key={claim.id}
+                  claim={claim}
+                  active={claim.id === activeId}
+                  setRef={(el) => { cardRefs.current[claim.id] = el }}
+                />
               ))
             )
           )}

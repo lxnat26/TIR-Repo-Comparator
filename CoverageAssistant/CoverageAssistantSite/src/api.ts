@@ -1,19 +1,6 @@
-/**
- * API layer for Coverage Assistant
- *
- * All requests are sent to VITE_API_URL (defaults to "" which uses the
- * Vite dev-server proxy at /api → http://localhost:8000).
- *
- * Backend contract (FastAPI):
- *   POST   /api/documents/upload   multipart/form-data  { file }
- *   GET    /api/documents
- *   DELETE /api/documents/:id
- *   POST   /api/analyze            application/json     { text, metadata? }
- */
-
 const API_BASE = (import.meta.env.VITE_API_URL as string) ?? ''
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Document types ───────────────────────────────────────────────────────────
 
 export type DocumentStatus = 'processing' | 'ready' | 'error'
 export type FileType = 'pdf' | 'docx'
@@ -22,42 +9,80 @@ export interface ReportDocument {
   id: string
   filename: string
   file_type: FileType
-  uploaded_at: string   // ISO 8601
+  uploaded_at: string
   status: DocumentStatus
   chunk_count?: number
   size_bytes?: number
 }
 
-export type ClaimCategory = 'milestone' | 'efficacy' | 'safety' | 'regulatory' | 'other'
-export type ClaimStatus =
-  | 'new_information'
-  | 'refined_detail'
-  | 'already_reported'
-  | 'contradiction'
-  | 'uncertainty'
+// ─── Claim types (mirrors raw backend JSON) ───────────────────────────────────
 
-export interface PreviouslyReported {
-  date: string    // e.g. "Mar 15, 2023"
-  source: string  // e.g. "XYZ Pharma Press Release"
-  summary: string
-}
+export type ClaimType   = 'milestone' | 'efficacy' | 'safety'
+export type ClaimStatus = 'new_information' | 'refined_detail' | 'already_reported'
 
 export interface ClaimResult {
-  id: string
-  claim_text: string
-  category: ClaimCategory
-  status: ClaimStatus
-  title: string
-  previously_reported?: PreviouslyReported
-  whats_new?: string
-  why_it_matters: string
+  id:               string
+  claim_type:       ClaimType
+  specific_type:    string
+  claim:            string   // "What's new" — the draft claim text
+  historical_claim: string   // "Previously reported" — matched historical text
+  report_date:      string   // formatted e.g. "Sep 2024"
+  classification:   ClaimStatus
+  reason:           string   // "Why it matters"
 }
 
 export interface AnalysisResult {
-  claim_count: number
-  claims: ClaimResult[]
-  analyzed_at: string       // ISO 8601
-  document_text?: string    // extracted plain text returned by the backend (optional)
+  claim_count:   number
+  claims:        ClaimResult[]
+  analyzed_at:   string
+  document_text?: string
+}
+
+// ─── Client-side mapping from raw backend shape ───────────────────────────────
+
+const _STATUS_MAP: Record<string, ClaimStatus> = {
+  'Already Reported': 'already_reported',
+  'Refined Detail':   'refined_detail',
+  'New Information':  'new_information',
+}
+
+const _VALID_TYPES: ClaimType[] = ['milestone', 'efficacy', 'safety']
+
+function _formatDate(raw: string): string {
+  if (!raw || raw === 'Unknown') return ''
+  try {
+    const parts = raw.split('-')
+    const y = parseInt(parts[0])
+    const m = parseInt(parts[1] ?? '7') - 1
+    const d = new Date(y, m, 1)
+    return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+  } catch {
+    return raw
+  }
+}
+
+function _mapClaim(c: Record<string, string>, i: number): ClaimResult {
+  return {
+    id:               `claim-${i}`,
+    claim_type:       _VALID_TYPES.includes(c.claim_type as ClaimType) ? (c.claim_type as ClaimType) : 'milestone',
+    specific_type:    c.specific_type ?? '',
+    claim:            c.claim ?? '',
+    historical_claim: c.historical_claim ?? '',
+    report_date:      _formatDate(c.report_date ?? ''),
+    classification:   _STATUS_MAP[c.classification] ?? 'already_reported',
+    reason:           c.reason ?? '',
+  }
+}
+
+function _mapResponse(data: Record<string, unknown>): AnalysisResult {
+  const raw = (data.claims as Record<string, string>[] | undefined) ?? []
+  const claims = raw.map(_mapClaim)
+  return {
+    claim_count:   claims.length,
+    claims,
+    analyzed_at:   (data.analyzed_at as string) ?? '',
+    document_text: data.document_text as string | undefined,
+  }
 }
 
 // ─── Document repository endpoints ───────────────────────────────────────────
@@ -65,51 +90,26 @@ export interface AnalysisResult {
 export async function uploadDocument(file: File): Promise<ReportDocument> {
   const body = new FormData()
   body.append('file', file)
-
-  const res = await fetch(`${API_BASE}/api/documents/upload`, {
-    method: 'POST',
-    body,
-  })
-
+  const res = await fetch(`${API_BASE}/api/documents/upload`, { method: 'POST', body })
   if (!res.ok) {
     const msg = await res.text().catch(() => '')
     throw new Error(msg || `Upload failed (${res.status})`)
   }
-
   return res.json() as Promise<ReportDocument>
 }
 
 export async function listDocuments(): Promise<ReportDocument[]> {
   const res = await fetch(`${API_BASE}/api/documents`)
-
-  if (!res.ok) {
-    throw new Error(`Could not load documents (${res.status})`)
-  }
-
+  if (!res.ok) throw new Error(`Could not load documents (${res.status})`)
   return res.json() as Promise<ReportDocument[]>
 }
 
 export async function deleteDocument(id: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/documents/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  })
-
-  if (!res.ok) {
-    throw new Error(`Delete failed (${res.status})`)
-  }
+  const res = await fetch(`${API_BASE}/api/documents/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  if (!res.ok) throw new Error(`Delete failed (${res.status})`)
 }
 
-// ─── Draft document analysis endpoint ────────────────────────────────────────
-//
-// Backend contract (FastAPI):
-//   POST /api/analyze/document   multipart/form-data
-//     file        - the PDF or DOCX file
-//     competitor  - (optional) string
-//     drug        - (optional) string
-//
-//   Response: AnalysisResult (JSON)
-//     document_text is optional — include it if the backend extracts the text,
-//     and the frontend will display it in the left panel of the analysis view.
+// ─── Analysis endpoints ───────────────────────────────────────────────────────
 
 export async function analyzeDocument(
   file: File,
@@ -119,18 +119,12 @@ export async function analyzeDocument(
   body.append('file', file)
   if (metadata?.competitor) body.append('competitor', metadata.competitor)
   if (metadata?.drug)       body.append('drug',       metadata.drug)
-
-  const res = await fetch(`${API_BASE}/api/analyze/document`, {
-    method: 'POST',
-    body,
-  })
-
+  const res = await fetch(`${API_BASE}/api/analyze/document`, { method: 'POST', body })
   if (!res.ok) {
     const msg = await res.text().catch(() => '')
     throw new Error(msg || `Analysis failed (${res.status})`)
   }
-
-  return res.json() as Promise<AnalysisResult>
+  return _mapResponse(await res.json() as Record<string, unknown>)
 }
 
 export async function analyzeDraft(payload: {
@@ -141,14 +135,14 @@ export async function analyzeDraft(payload: {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      text: payload.text,
+      text:       payload.text,
       competitor: payload.metadata?.competitor,
-      drug: payload.metadata?.drug,
+      drug:       payload.metadata?.drug,
     }),
   })
   if (!res.ok) {
     const msg = await res.text().catch(() => '')
     throw new Error(msg || `Analysis failed (${res.status})`)
   }
-  return res.json() as Promise<AnalysisResult>
+  return _mapResponse(await res.json() as Record<string, unknown>)
 }
