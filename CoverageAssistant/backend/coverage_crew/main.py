@@ -38,7 +38,7 @@ except ImportError:
         sanitize_for_ui,
     )
 
-DRAFT_PDF = REPO_ROOT / "SmartRepo" / "docsInput" / "2024_sanofi_dupixent_ad_trial_results.pdf"
+DRAFT_PDF = REPO_ROOT / "SmartRepo" / "docsInput" / "2026_lilly_lebrikizumab_bla_submission.pdf"
 
 
 def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str = None) -> dict:
@@ -58,11 +58,6 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
 
     claims_data = parse_model_json(extraction_result.raw)
 
-    # Defensive unwrapping: llama3.1 doesn't always respect the schema envelope.
-    # Flatten any of these shapes into a plain list of claim dicts:
-    #   {"claims": [...]}          → inner list (expected)
-    #   [ {claim}, {claim}, ... ]  → already flat
-    #   [ {"claims": [...]}, ... ] → concat inner lists (observed bug)
     if isinstance(claims_data, dict):
         claims = claims_data.get("claims", [])
     elif isinstance(claims_data, list):
@@ -77,7 +72,6 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
     else:
         claims = []
 
-    # Validate claim_type; coerce invalid specific_type to "" rather than dropping the claim.
     valid_claims = []
     for c in claims:
         ct = c.get("claim_type")
@@ -149,10 +143,6 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
             c.get("historical_claim") or c.get("historical_match") or ""
         )
 
-        # report_date is only meaningful when there IS a real historical match.
-        # If the classifier decided "New Information" OR the historical_claim is the
-        # no-match sentinel, clear the date to "Unknown" — the nearest-neighbor date
-        # Python captured is stale in that case.
         if cls == "New Information" or historical_claim == "No historical matches found":
             report_date = "Unknown"
         else:

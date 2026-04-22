@@ -108,6 +108,11 @@ class QueryDBTool(BaseTool):
                         if kw in company_val:
                             matched_companies.add(meta["company_name"])
 
+                if drug_name and not matched_drugs:
+                    print("  drug was specified but no chunk has that drug; "
+                          "refusing company-only fallback — returning no match")
+                    return {"text": "No historical matches found", "report_date": "Unknown"}
+
                 conditions = []
                 if matched_drugs:
                     if len(matched_drugs) == 1:
