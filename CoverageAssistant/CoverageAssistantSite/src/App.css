@@ -813,6 +813,7 @@ h1, h2, h3 {
 .meta-input::placeholder { color: var(--muted-fg); }
 
 .editor-textarea {
+  display: block;
   resize: none;
   border: none;
   outline: none;
@@ -823,6 +824,7 @@ h1, h2, h3 {
   color: var(--fg);
   background: #FFFFFF;
   width: 760px;
+  max-width: 100%;
   min-height: calc(100vh - 46px - 45px - 32px);
   margin: 24px auto;
   box-shadow: 0 1px 3px rgba(0,0,0,0.15);
