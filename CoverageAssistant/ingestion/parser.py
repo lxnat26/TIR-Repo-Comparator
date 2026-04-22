@@ -91,10 +91,10 @@ def run_smart_parser(file_path):
 
 
 if __name__ == "__main__":
-    pdf_files = list(INPUT_DIR.glob("*.pdf"))
+    doc_files = list(INPUT_DIR.glob("*.pdf")) + list(INPUT_DIR.glob("*.docx"))
 
-    if not pdf_files:
-        print("No PDFs found.")
+    if not doc_files:
+        print("No PDF or DOCX files found.")
     else:
-        for pdf in pdf_files:
-            run_smart_parser(pdf)
+        for doc in doc_files:
+            run_smart_parser(doc)
