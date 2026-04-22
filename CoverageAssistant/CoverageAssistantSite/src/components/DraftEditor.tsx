@@ -107,27 +107,45 @@ function findSentenceBounds(docText: string, phraseIdx: number): { start: number
 }
 
 function buildSegments(docText: string, claims: ClaimResult[]): Segment[] {
-  const hits: { start: number; end: number; claimId: string }[] = []
-
+  // Pass 1: find initial phrase positions
+  type Anchor = { phraseStart: number; phraseEnd: number; claimId: string; phrase: string }
+  const anchors: Anchor[] = []
   for (const claim of claims) {
     const phrase = claim.claim?.slice(0, 80)
     if (!phrase || phrase.length < 15) continue
     const idx = docText.indexOf(phrase)
-    if (idx !== -1) {
-      const { start, end } = findSentenceBounds(docText, idx)
-      hits.push({ start, end, claimId: claim.id })
+    if (idx !== -1) anchors.push({ phraseStart: idx, phraseEnd: idx + phrase.length, claimId: claim.id, phrase })
+  }
+  anchors.sort((a, b) => a.phraseStart - b.phraseStart)
+
+  // Pass 2: deduplicate — if two anchors overlap, find the next occurrence for the later one
+  const placed: Anchor[] = []
+  for (const anchor of anchors) {
+    const prev = placed[placed.length - 1]
+    if (!prev || anchor.phraseStart >= prev.phraseEnd) {
+      placed.push(anchor)
+    } else {
+      // Overlap: search for a non-overlapping occurrence after the previous claim ends
+      const nextIdx = docText.indexOf(anchor.phrase, prev.phraseEnd)
+      if (nextIdx !== -1) {
+        placed.push({ ...anchor, phraseStart: nextIdx, phraseEnd: nextIdx + anchor.phrase.length })
+      }
+      // If no other occurrence exists, skip — can't place this claim without collision
     }
   }
+  placed.sort((a, b) => a.phraseStart - b.phraseStart)
 
-  hits.sort((a, b) => a.start - b.start)
-  const merged: typeof hits = []
-  for (const h of hits) {
-    if (!merged.length || h.start >= merged[merged.length - 1].end) merged.push(h)
-  }
+  // Pass 3: expand each to sentence bounds, clamped by neighboring phrase edges
+  const hits = placed.map(({ phraseStart, claimId }, i) => {
+    const { start, end } = findSentenceBounds(docText, phraseStart)
+    const lower = i > 0 ? placed[i - 1].phraseEnd : 0
+    const upper = i < placed.length - 1 ? placed[i + 1].phraseStart : docText.length
+    return { start: Math.max(start, lower), end: Math.min(end, upper), claimId }
+  })
 
   const segs: Segment[] = []
   let cursor = 0
-  for (const { start, end, claimId } of merged) {
+  for (const { start, end, claimId } of hits) {
     if (cursor < start) segs.push({ text: docText.slice(cursor, start) })
     segs.push({ text: docText.slice(start, end), claimId })
     cursor = end
@@ -220,8 +238,9 @@ function ClaimCard({
   const pal = PALETTE[claim.claim_type] ?? PALETTE.milestone
   const showHistory = hasHistory(claim)
 
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded]   = useState(false)
   const [overflows, setOverflows] = useState(false)
+  const [copied, setCopied]       = useState(false)
   const histRef  = useRef<HTMLParagraphElement>(null)
   const claimRef = useRef<HTMLParagraphElement>(null)
 
@@ -231,9 +250,11 @@ function ClaimCard({
     setOverflows(hOver || cOver)
   }, [claim.historical_claim, claim.claim])
 
-  function copyText(e: React.MouseEvent) {
+  function copyHistorical(e: React.MouseEvent) {
     e.stopPropagation()
-    navigator.clipboard.writeText(claim.claim).catch(() => {})
+    navigator.clipboard.writeText(claim.historical_claim).catch(() => {})
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
   }
 
   return (
@@ -284,14 +305,14 @@ function ClaimCard({
                 {claim.report_date && (
                   <p className="cc-compare-source">From Historical DB · {claim.report_date}</p>
                 )}
+                <button className="cc-copy-btn" type="button" onClick={copyHistorical}>
+                  <IconCopy />
+                  {copied ? 'Copied ✓' : 'Copy Text'}
+                </button>
               </div>
               <div className="cc-compare-col cc-compare-col--right">
                 <p className="cc-compare-heading">What's new</p>
                 <CollapsedText text={claim.claim} expanded={expanded} pRef={claimRef} />
-                <button className="cc-copy-btn" onClick={copyText} type="button">
-                  <IconCopy />
-                  Copy Text
-                </button>
               </div>
             </div>
             {overflows && (
@@ -363,6 +384,7 @@ export function DraftEditor({
   const [uploading, setUploading]   = useState(false)
   const [error, setError]           = useState<string | null>(null)
   const [activeId, setActiveId]     = useState<string | null>(null)
+  const [editMode, setEditMode]     = useState(false)
 
   const inputRef      = useRef<HTMLInputElement>(null)
   const cardRefs      = useRef<Record<string, HTMLDivElement | null>>({})
@@ -397,6 +419,7 @@ export function DraftEditor({
       const res = await analyzeDocument(f)
       setDraftText(res.document_text ?? '')
       setResult(res)
+      setEditMode(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed.')
     } finally {
@@ -412,6 +435,7 @@ export function DraftEditor({
     try {
       const res = await analyzeDraft({ text: draftText })
       setResult(res)
+      setEditMode(false)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Analysis failed. Is the backend running?')
     } finally {
@@ -433,6 +457,11 @@ export function DraftEditor({
           </div>
           <div className="editor-header-actions">
             <input ref={inputRef} type="file" accept=".pdf,.docx,.doc" onChange={handleNewFile} style={{ display: 'none' }} />
+            {result && !loading && !uploading && (
+              <button className="btn btn-ghost btn-sm" onClick={() => setEditMode(v => !v)}>
+                {editMode ? 'View Highlights' : 'Edit Draft'}
+              </button>
+            )}
             <button className="btn btn-ghost btn-sm" onClick={() => inputRef.current?.click()} disabled={uploading || loading}>
               {uploading ? 'Uploading...' : 'Upload New Draft'}
             </button>
@@ -443,7 +472,7 @@ export function DraftEditor({
         </div>
 
         <div className="editor-content-area">
-          {result ? (
+          {result && !editMode ? (
             <div className="editor-doc-text">
               <DocumentView
                 text={draftText}
