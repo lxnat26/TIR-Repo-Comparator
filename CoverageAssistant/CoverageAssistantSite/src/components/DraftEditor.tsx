@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useLayoutEffect } from 'react'
 import { analyzeDraft, analyzeDocument } from '../api'
 import type { AnalysisResult, ClaimResult, ClaimType, ClaimStatus } from '../api'
 
@@ -82,6 +82,30 @@ function IconCopy() {
 
 type Segment = { text: string; claimId?: string }
 
+function findSentenceBounds(docText: string, phraseIdx: number): { start: number; end: number } {
+  // Walk backwards to the start of the sentence
+  let start = phraseIdx
+  while (start > 0) {
+    const c = docText[start - 1]
+    if (c === '\n') break
+    if ((c === '.' || c === '!' || c === '?') && /\s/.test(docText[start] ?? ' ')) break
+    start--
+  }
+  while (start < phraseIdx && /\s/.test(docText[start])) start++
+
+  // Walk forwards to the end of the sentence
+  let end = phraseIdx
+  while (end < docText.length) {
+    const c = docText[end]
+    end++
+    if (c === '\n') break
+    if ((c === '.' || c === '!' || c === '?') && (end >= docText.length || /\s/.test(docText[end]))) break
+  }
+  while (end > start && /\s/.test(docText[end - 1])) end--
+
+  return { start, end }
+}
+
 function buildSegments(docText: string, claims: ClaimResult[]): Segment[] {
   const hits: { start: number; end: number; claimId: string }[] = []
 
@@ -89,7 +113,10 @@ function buildSegments(docText: string, claims: ClaimResult[]): Segment[] {
     const phrase = claim.claim?.slice(0, 80)
     if (!phrase || phrase.length < 15) continue
     const idx = docText.indexOf(phrase)
-    if (idx !== -1) hits.push({ start: idx, end: idx + phrase.length, claimId: claim.id })
+    if (idx !== -1) {
+      const { start, end } = findSentenceBounds(docText, idx)
+      hits.push({ start, end, claimId: claim.id })
+    }
   }
 
   hits.sort((a, b) => a.start - b.start)
@@ -147,6 +174,41 @@ function DocumentView({
         )
       })}
     </>
+  )
+}
+
+// ─── TextCollapse ─────────────────────────────────────────────────────────────
+
+function TextCollapse({ text, quoted = false }: { text: string; quoted?: boolean }) {
+  const [expanded, setExpanded] = useState(false)
+  const [overflows, setOverflows] = useState(false)
+  const ref = useRef<HTMLParagraphElement>(null)
+
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // Measure with clamp applied; scrollHeight > clientHeight means it overflows
+    setOverflows(el.scrollHeight > el.clientHeight + 2)
+  }, [text])
+
+  return (
+    <div>
+      <p
+        ref={ref}
+        className={`cc-compare-body${expanded ? '' : ' cc-compare-body--clamped'}`}
+      >
+        {quoted ? `"${text}"` : text}
+      </p>
+      {overflows && (
+        <button
+          className="cc-see-more"
+          type="button"
+          onClick={(e) => { e.stopPropagation(); setExpanded(v => !v) }}
+        >
+          {expanded ? 'See less ↑' : 'See more ↓'}
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -221,14 +283,14 @@ function ClaimCard({
           <div className="cc-compare-grid">
             <div className="cc-compare-col">
               <p className="cc-compare-heading">Previously reported:</p>
-              <p className="cc-compare-body">"{claim.historical_claim}"</p>
+              <TextCollapse text={claim.historical_claim} quoted />
               {claim.report_date && (
                 <p className="cc-compare-source">From Historical DB · {claim.report_date}</p>
               )}
             </div>
             <div className="cc-compare-col cc-compare-col--right">
               <p className="cc-compare-heading">What's new</p>
-              <p className="cc-compare-body">{claim.claim}</p>
+              <TextCollapse text={claim.claim} />
               <button className="cc-copy-btn" onClick={copyText} type="button">
                 <IconCopy />
                 Copy Text
