@@ -1147,7 +1147,7 @@ h1, h2, h3 {
 .cc-compare {
   background: var(--cc-box-bg, rgba(0,32,91,0.08));
   border-radius: 10px;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .cc-compare-new {
@@ -1187,10 +1187,6 @@ h1, h2, h3 {
   line-height: 1.65;
   color: var(--fg);
   flex: 1;
-  display: -webkit-box;
-  -webkit-line-clamp: 5;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 
 .cc-compare-source {
@@ -1260,6 +1256,24 @@ h1, h2, h3 {
   white-space: pre-wrap;
   box-shadow: 0 1px 3px rgba(0,0,0,0.15);
 }
+
+/* ── See more / collapse ── */
+.cc-compare-body--clamped {
+  max-height: 4.5em;
+  overflow: hidden;
+}
+.cc-see-more {
+  background: none;
+  border: none;
+  padding: 3px 0 0;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--cc-primary, #00205B);
+  text-decoration: underline;
+  display: block;
+}
+.cc-see-more:hover { opacity: 0.75; }
 
 /* ── Document highlights ── */
 .doc-highlight {
