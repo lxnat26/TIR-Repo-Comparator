@@ -13,7 +13,8 @@ import io
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from SmartRepo.store_reports import ingest_pdf, collection
+from CoverageAssistant.ingestion.data_main import ingest_pdf
+from CoverageAssistant.ingestion.vector_store_aligned import get_collection
 from CoverageAssistant.backend.coverage_crew.main import run_on_text
 
 app = FastAPI()
@@ -46,7 +47,7 @@ async def upload_file(file: UploadFile = File(...)):
 
 @app.get("/api/documents")
 async def list_documents():
-    results = collection.get(include=["metadatas"])
+    results = get_collection().get(include=["metadatas"])
     seen = {}
     for metadata in results["metadatas"]:
         doc_id = metadata["doc_id"]

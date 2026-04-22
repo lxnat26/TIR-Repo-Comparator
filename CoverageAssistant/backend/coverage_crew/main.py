@@ -11,7 +11,6 @@ if str(REPO_ROOT) not in sys.path:
 
 try:
     from CoverageAssistant.ingestion import parser
-    from CoverageAssistant.ingestion.vector_store import index_processed_data
 except ImportError:
     sys.path.append(str(REPO_ROOT / "CoverageAssistant" / "ingestion"))
     import parser

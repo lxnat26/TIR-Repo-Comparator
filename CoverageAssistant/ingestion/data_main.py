@@ -7,12 +7,31 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # adds ingestion/ to p
 
 INPUT_DIR = ROOT_DIR / "SmartRepo" / "docs"
 DB_PATH = ROOT_DIR / "pharma_db"
+PROCESSED_DIR = ROOT_DIR / "processed_reports"
 
 import parser as pdf_parser
 import vector_store_aligned
 
 
+def ingest_pdf(pdf_path: Path) -> None:
+    """Parse one PDF → markdown → index into pharma_db.
+
+    Used by both the per-upload API path and the batch run_ingestion_pipeline().
+    """
+    pdf_path = Path(pdf_path)
+    print(f"📄 Parsing {pdf_path.name}")
+    pdf_parser.run_smart_parser(pdf_path)
+
+    md_path = PROCESSED_DIR / f"{pdf_path.stem}.md"
+    if not md_path.exists():
+        print(f"❌ Expected markdown not found after parsing: {md_path}")
+        return
+
+    vector_store_aligned.index_single_markdown(md_path)
+
+
 def run_ingestion_pipeline():
+    """Batch entry point — parses every PDF in SmartRepo/docs and indexes each."""
     print("\n--- Starting Full Data Pipeline ---")
     print(f"Looking for PDFs in: {INPUT_DIR.resolve()}")
 
@@ -31,21 +50,15 @@ def run_ingestion_pipeline():
         print(f"🧹 Clearing old database at {DB_PATH}...")
         shutil.rmtree(DB_PATH)
 
-    # Stage 1: PDF → markdown (Yehoon's parser)
-    print("\n[1/2] Parsing PDFs to markdown...")
     parsed_count = 0
     for pdf in pdf_files:
         try:
-            pdf_parser.run_smart_parser(pdf)
+            ingest_pdf(pdf)
             parsed_count += 1
         except Exception as e:
-            print(f"❌ Failed parsing {pdf.name}: {e}")
-    print(f"\nParsed {parsed_count}/{len(pdf_files)} PDFs")
+            print(f"❌ Failed ingesting {pdf.name}: {e}")
 
-    # Stage 2: markdown → ChromaDB (pharma_db, pharma_reports)
-    print("\n[2/2] Indexing into vector store...")
-    vector_store_aligned.index_processed_data()
-
+    print(f"\nIngested {parsed_count}/{len(pdf_files)} PDFs")
     print("\n--- Data Pipeline Complete ---")
     return True
 
