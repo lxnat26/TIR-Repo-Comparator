@@ -177,38 +177,23 @@ function DocumentView({
   )
 }
 
-// ─── TextCollapse ─────────────────────────────────────────────────────────────
+// ─── CollapsedText ────────────────────────────────────────────────────────────
 
-function TextCollapse({ text, quoted = false }: { text: string; quoted?: boolean }) {
-  const [expanded, setExpanded] = useState(false)
-  const [overflows, setOverflows] = useState(false)
-  const ref = useRef<HTMLParagraphElement>(null)
-
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    // Measure with clamp applied; scrollHeight > clientHeight means it overflows
-    setOverflows(el.scrollHeight > el.clientHeight + 2)
-  }, [text])
-
+function CollapsedText({
+  text, quoted = false, expanded, pRef,
+}: {
+  text: string
+  quoted?: boolean
+  expanded: boolean
+  pRef?: React.RefObject<HTMLParagraphElement | null>
+}) {
   return (
-    <div>
-      <p
-        ref={ref}
-        className={`cc-compare-body${expanded ? '' : ' cc-compare-body--clamped'}`}
-      >
-        {quoted ? `"${text}"` : text}
-      </p>
-      {overflows && (
-        <button
-          className="cc-see-more"
-          type="button"
-          onClick={(e) => { e.stopPropagation(); setExpanded(v => !v) }}
-        >
-          {expanded ? 'See less ↑' : 'See more ↓'}
-        </button>
-      )}
-    </div>
+    <p
+      ref={pRef}
+      className={`cc-compare-body${expanded ? '' : ' cc-compare-body--clamped'}`}
+    >
+      {quoted ? `"${text}"` : text}
+    </p>
   )
 }
 
@@ -234,6 +219,17 @@ function ClaimCard({
 }) {
   const pal = PALETTE[claim.claim_type] ?? PALETTE.milestone
   const showHistory = hasHistory(claim)
+
+  const [expanded, setExpanded] = useState(false)
+  const [overflows, setOverflows] = useState(false)
+  const histRef  = useRef<HTMLParagraphElement>(null)
+  const claimRef = useRef<HTMLParagraphElement>(null)
+
+  useLayoutEffect(() => {
+    const hOver = (histRef.current?.scrollHeight  ?? 0) > (histRef.current?.clientHeight  ?? 0) + 2
+    const cOver = (claimRef.current?.scrollHeight ?? 0) > (claimRef.current?.clientHeight ?? 0) + 2
+    setOverflows(hOver || cOver)
+  }, [claim.historical_claim, claim.claim])
 
   function copyText(e: React.MouseEvent) {
     e.stopPropagation()
@@ -280,23 +276,36 @@ function ClaimCard({
       {/* ── Comparison box ── */}
       <div className="cc-compare">
         {showHistory ? (
-          <div className="cc-compare-grid">
-            <div className="cc-compare-col">
-              <p className="cc-compare-heading">Previously reported:</p>
-              <TextCollapse text={claim.historical_claim} quoted />
-              {claim.report_date && (
-                <p className="cc-compare-source">From Historical DB · {claim.report_date}</p>
-              )}
+          <>
+            <div className="cc-compare-grid">
+              <div className="cc-compare-col">
+                <p className="cc-compare-heading">Previously reported:</p>
+                <CollapsedText text={claim.historical_claim} quoted expanded={expanded} pRef={histRef} />
+                {claim.report_date && (
+                  <p className="cc-compare-source">From Historical DB · {claim.report_date}</p>
+                )}
+              </div>
+              <div className="cc-compare-col cc-compare-col--right">
+                <p className="cc-compare-heading">What's new</p>
+                <CollapsedText text={claim.claim} expanded={expanded} pRef={claimRef} />
+                <button className="cc-copy-btn" onClick={copyText} type="button">
+                  <IconCopy />
+                  Copy Text
+                </button>
+              </div>
             </div>
-            <div className="cc-compare-col cc-compare-col--right">
-              <p className="cc-compare-heading">What's new</p>
-              <TextCollapse text={claim.claim} />
-              <button className="cc-copy-btn" onClick={copyText} type="button">
-                <IconCopy />
-                Copy Text
-              </button>
-            </div>
-          </div>
+            {overflows && (
+              <div style={{ padding: '4px 14px 10px' }}>
+                <button
+                  className="cc-see-more"
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setExpanded(v => !v) }}
+                >
+                  {expanded ? 'See less ↑' : 'See more ↓'}
+                </button>
+              </div>
+            )}
+          </>
         ) : (
           <p className="cc-compare-new">This information was not in previous reports.</p>
         )}
