@@ -1263,10 +1263,14 @@ h1, h2, h3 {
 
 /* ── Document highlights ── */
 .doc-highlight {
-  background: rgba(0, 32, 91, 0.1);
+  text-decoration: underline;
+  text-decoration-color: var(--hl-color, #00205B);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
   cursor: pointer;
+  background: transparent;
   border-radius: 2px;
-  transition: background 0.1s;
+  transition: background 0.15s;
 }
-.doc-highlight:hover    { background: rgba(0, 32, 91, 0.2); }
-.doc-highlight--active  { background: rgba(0, 32, 91, 0.28); box-shadow: 0 0 0 1px #00205B; }
+.doc-highlight:hover     { background: var(--hl-bg, rgba(0,32,91,0.1)); }
+.doc-highlight--active   { background: var(--hl-bg-active, rgba(0,32,91,0.18)); }

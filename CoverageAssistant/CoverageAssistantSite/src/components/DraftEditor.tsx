@@ -10,10 +10,22 @@ const ACCEPTED_MIME = new Set([
 
 // ─── Per-type color palette ───────────────────────────────────────────────────
 
-const PALETTE: Record<ClaimType, { primary: string; bg: string; boxBg: string; border: string }> = {
-  milestone: { primary: '#c0392b', bg: 'rgba(192,57,43,0.04)',  boxBg: 'rgba(192,57,43,0.09)',  border: 'rgba(192,57,43,0.22)' },
-  efficacy:  { primary: '#27ae60', bg: 'rgba(39,174,96,0.04)',  boxBg: 'rgba(39,174,96,0.09)',  border: 'rgba(39,174,96,0.22)'  },
-  safety:    { primary: '#8a7300', bg: 'rgba(138,115,0,0.04)',  boxBg: 'rgba(138,115,0,0.09)',  border: 'rgba(138,115,0,0.22)'  },
+const PALETTE: Record<ClaimType, {
+  primary: string; bg: string; boxBg: string; border: string
+  hlBg: string; hlBgActive: string
+}> = {
+  milestone: {
+    primary: '#c0392b', bg: 'rgba(192,57,43,0.04)', boxBg: 'rgba(192,57,43,0.09)', border: 'rgba(192,57,43,0.22)',
+    hlBg: 'rgba(192,57,43,0.13)', hlBgActive: 'rgba(192,57,43,0.24)',
+  },
+  efficacy: {
+    primary: '#27ae60', bg: 'rgba(39,174,96,0.04)', boxBg: 'rgba(39,174,96,0.09)', border: 'rgba(39,174,96,0.22)',
+    hlBg: 'rgba(39,174,96,0.13)', hlBgActive: 'rgba(39,174,96,0.24)',
+  },
+  safety: {
+    primary: '#8a7300', bg: 'rgba(138,115,0,0.04)', boxBg: 'rgba(138,115,0,0.09)', border: 'rgba(138,115,0,0.22)',
+    hlBg: 'rgba(138,115,0,0.13)', hlBgActive: 'rgba(138,115,0,0.24)',
+  },
 }
 
 const TYPE_LABEL: Record<ClaimType, string> = {
@@ -100,26 +112,40 @@ function buildSegments(docText: string, claims: ClaimResult[]): Segment[] {
 // ─── DocumentView ─────────────────────────────────────────────────────────────
 
 function DocumentView({
-  text, claims, activeId, onPhraseClick,
+  text, claims, activeId, onPhraseClick, setHighlightRef,
 }: {
-  text: string; claims: ClaimResult[]; activeId: string | null; onPhraseClick: (id: string) => void
+  text: string
+  claims: ClaimResult[]
+  activeId: string | null
+  onPhraseClick: (id: string) => void
+  setHighlightRef: (id: string, el: HTMLElement | null) => void
 }) {
   const segments = buildSegments(text, claims)
+  const claimMap = Object.fromEntries(claims.map(c => [c.id, c]))
+
   return (
     <>
-      {segments.map((seg, i) =>
-        seg.claimId ? (
+      {segments.map((seg, i) => {
+        if (!seg.claimId) return <span key={i}>{seg.text}</span>
+        const claim = claimMap[seg.claimId]
+        const pal = PALETTE[claim?.claim_type ?? 'milestone']
+        const isActive = seg.claimId === activeId
+        return (
           <mark
             key={i}
-            className={`doc-highlight${seg.claimId === activeId ? ' doc-highlight--active' : ''}`}
+            ref={(el) => setHighlightRef(seg.claimId!, el)}
+            className={`doc-highlight${isActive ? ' doc-highlight--active' : ''}`}
+            style={{
+              '--hl-color':      pal.primary,
+              '--hl-bg':         pal.hlBg,
+              '--hl-bg-active':  pal.hlBgActive,
+            } as React.CSSProperties}
             onClick={() => onPhraseClick(seg.claimId!)}
           >
             {seg.text}
           </mark>
-        ) : (
-          <span key={i}>{seg.text}</span>
         )
-      )}
+      })}
     </>
   )
 }
@@ -137,16 +163,18 @@ function hasHistory(claim: ClaimResult): boolean {
 }
 
 function ClaimCard({
-  claim, active, setRef,
+  claim, active, setRef, onCardClick,
 }: {
   claim: ClaimResult
   active: boolean
   setRef: (el: HTMLDivElement | null) => void
+  onCardClick: (id: string) => void
 }) {
   const pal = PALETTE[claim.claim_type] ?? PALETTE.milestone
   const showHistory = hasHistory(claim)
 
-  function copyText() {
+  function copyText(e: React.MouseEvent) {
+    e.stopPropagation()
     navigator.clipboard.writeText(claim.claim).catch(() => {})
   }
 
@@ -159,7 +187,9 @@ function ClaimCard({
         '--cc-bg':      pal.bg,
         '--cc-box-bg':  pal.boxBg,
         '--cc-border':  pal.border,
+        cursor: 'pointer',
       } as React.CSSProperties}
+      onClick={() => onCardClick(claim.id)}
     >
       {/* ── Badge row ── */}
       <div className="cc-header">
@@ -256,23 +286,32 @@ export function DraftEditor({
   initialText?: string
   initialResult?: AnalysisResult | null
 }) {
-  const [draftText, setDraftText]         = useState(initialText)
-  const [result, setResult]               = useState<AnalysisResult | null>(initialResult)
-  const [loading, setLoading]             = useState(false)
-  const [uploading, setUploading]         = useState(false)
-  const [error, setError]                 = useState<string | null>(null)
-  const [activeId, setActiveId]           = useState<string | null>(null)
+  const [draftText, setDraftText]   = useState(initialText)
+  const [result, setResult]         = useState<AnalysisResult | null>(initialResult)
+  const [loading, setLoading]       = useState(false)
+  const [uploading, setUploading]   = useState(false)
+  const [error, setError]           = useState<string | null>(null)
+  const [activeId, setActiveId]     = useState<string | null>(null)
 
-  const inputRef = useRef<HTMLInputElement>(null)
-  const cardRefs = useRef<Record<string, HTMLDivElement | null>>({})
+  const inputRef      = useRef<HTMLInputElement>(null)
+  const cardRefs      = useRef<Record<string, HTMLDivElement | null>>({})
+  const highlightRefs = useRef<Record<string, HTMLElement | null>>({})
 
-  const wordCount = draftText.trim() === '' ? 0 : draftText.trim().split(/\s+/).length
+  const wordCount    = draftText.trim() === '' ? 0 : draftText.trim().split(/\s+/).length
   const pendingCount = result?.claims.length ?? 0
 
-  const navigateToCard = useCallback((id: string) => {
+  // Click on a highlight → scroll the matching card into view
+  const handlePhraseClick = useCallback((id: string) => {
     setActiveId(id)
-    const el = cardRefs.current[id]
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    const card = cardRefs.current[id]
+    if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+  }, [])
+
+  // Click on a card → scroll the matching highlight into view
+  const handleCardClick = useCallback((id: string) => {
+    setActiveId(id)
+    const hl = highlightRefs.current[id]
+    if (hl) hl.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [])
 
   async function handleNewFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -339,7 +378,8 @@ export function DraftEditor({
                 text={draftText}
                 claims={result.claims}
                 activeId={activeId}
-                onPhraseClick={navigateToCard}
+                onPhraseClick={handlePhraseClick}
+                setHighlightRef={(id, el) => { highlightRefs.current[id] = el }}
               />
             </div>
           ) : (
@@ -395,6 +435,7 @@ export function DraftEditor({
                   claim={claim}
                   active={claim.id === activeId}
                   setRef={(el) => { cardRefs.current[claim.id] = el }}
+                  onCardClick={handleCardClick}
                 />
               ))
             )
