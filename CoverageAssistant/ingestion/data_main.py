@@ -9,7 +9,7 @@ INPUT_DIR = ROOT_DIR / "SmartRepo" / "docs"
 DB_PATH = ROOT_DIR / "pharma_db"
 
 import parser as pdf_parser
-import vector_store
+import vector_store_aligned
 
 
 def run_ingestion_pipeline():
@@ -44,7 +44,7 @@ def run_ingestion_pipeline():
 
     # Stage 2: markdown → ChromaDB (pharma_db, pharma_reports)
     print("\n[2/2] Indexing into vector store...")
-    vector_store.index_processed_data()
+    vector_store_aligned.index_processed_data()
 
     print("\n--- Data Pipeline Complete ---")
     return True
