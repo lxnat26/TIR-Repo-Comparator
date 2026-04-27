@@ -22,7 +22,6 @@ try:
         VALID_CLAIM_TYPES,
         VALID_CLASSIFICATIONS,
         VALID_SPECIFIC_TYPES,
-        extract_metadata_from_filename,
         parse_model_json,
         sanitize_for_ui,
     )
@@ -33,12 +32,13 @@ except ImportError:
         VALID_CLAIM_TYPES,
         VALID_CLASSIFICATIONS,
         VALID_SPECIFIC_TYPES,
-        extract_metadata_from_filename,
         parse_model_json,
         sanitize_for_ui,
     )
 
-DRAFT_PDF = REPO_ROOT / "SmartRepo" / "docsInput" / "2026_lilly_lebrikizumab_bla_submission.pdf"
+from CoverageAssistant.ingestion.vector_store_aligned import extract_metadata_with_ai
+
+DRAFT_PDF = REPO_ROOT / "SmartRepo" / "docsInput" / "260426-Alert-Sonrotoclax Plus Zanubrutinib vs Venetoclax Plus Acalabrutinib in Untreated CLL.docx"
 
 
 def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str = None) -> dict:
@@ -83,6 +83,12 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
         c["specific_type"] = st
         valid_claims.append(c)
     claims = valid_claims
+
+    if not claims:
+        return {
+            "claims": [],
+            "raw_output": "No valid claims extracted from report text.",
+        }
 
     # Step 2: Query ChromaDB for each claim
     tool = QueryDBTool()
@@ -137,13 +143,12 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
         
         cls = c.get("classification")
         if cls not in VALID_CLASSIFICATIONS:
-            cls = "Uncertain"
-
+            cls = "New Information"
         historical_claim = sanitize_for_ui(
-            c.get("historical_claim") or c.get("historical_match") or ""
+            src.get("historical_match") or c.get("historical_match") or c.get("historical_claim") or ""
         )
 
-        if cls == "New Information" or historical_claim == "No historical matches found":
+        if historical_claim == "No historical matches found":
             report_date = "Unknown"
         else:
             report_date = src.get("report_date", "Unknown")
@@ -151,7 +156,7 @@ def _run_crew_on_text(report_text: str, drug_name: str = None, company_name: str
         out.append({
             "claim_type":       ct,
             "specific_type":    st,
-            "claim":            sanitize_for_ui(c.get("claim", "")),
+            "claim":            sanitize_for_ui(c.get("claim") or src.get("claim") or ""),
             "historical_claim": historical_claim,
             "report_date":      report_date,
             "classification":   cls,
@@ -176,7 +181,7 @@ def run():
     with report_path.open("r", encoding="utf-8") as f:
         report_text = f.read()
 
-    meta = extract_metadata_from_filename(DRAFT_PDF.name)
+    meta = extract_metadata_with_ai(report_text)
     drug_name = meta.get("drug_name")
     company_name = meta.get("company_name")
 
