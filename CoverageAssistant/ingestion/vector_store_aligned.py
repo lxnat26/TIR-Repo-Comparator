@@ -1,8 +1,7 @@
 """Indexes parsed markdown reports into the unified pharma_db/pharma_reports collection.
 
-Metadata (`company_name`, `drug_name`, `report_date`) is extracted by an LLM
-(`llama3.2` via Ollama, JSON mode) — this handles varied header formats that a
-regex on `Date:` can't reliably catch.
+Metadata (company_name, drug_name, report_date) is extracted by an LLM
+(llama3.2 via Ollama, JSON mode) — this handles varied header formats.
 """
 
 import hashlib
@@ -50,22 +49,15 @@ def get_collection():
 
 
 def extract_metadata_with_ai(text_content: str) -> dict:
-    """Ask the LLM to read the top of the report and return structured metadata.
-
-    Returns a dict with keys `company_name`, `drug_name`, `report_date`
-    (YYYY-MM-DD). Any field the LLM can't determine is 'Unknown'.
-    """
-    snippet = text_content[:2000]
-
+    """Dynamically extracts metadata as joined strings to handle multiple entries."""
+    snippet = text_content[:1500]
     prompt = f"""
-    Analyze the following clinical report text and extract metadata into a JSON object.
-
-    RULES:
-    1. report_date must be in YYYY-MM-DD format.
-    2. Use "Unknown" for any missing fields.
-    3. Output ONLY valid JSON.
-
-    Required keys: "company_name", "drug_name", "report_date"
+    Analyze the clinical report text. Extract the following into a JSON object:
+    - company_names: List of strings (e.g., ["Eli Lilly", "Pfizer"])
+    - drug_names: List of strings (e.g., ["Lebrikizumab", "Dupixent"])
+    - report_date: String in YYYY-MM-DD format
+    
+    If any field is missing, return ["Unknown"] for lists or "Unknown" for date.
 
     Text:
     {snippet}
@@ -73,10 +65,11 @@ def extract_metadata_with_ai(text_content: str) -> dict:
     try:
         response = _metadata_llm.invoke(prompt)
         data = json.loads(response.content)
+        # Flatten lists into comma-separated strings for ChromaDB compatibility
         return {
-            "company_name": str(data.get("company_name", "Unknown")),
-            "drug_name": str(data.get("drug_name", "Unknown")),
-            "report_date": str(data.get("report_date", "Unknown")),
+            "company_name": ", ".join(data.get("company_names", ["Unknown"])),
+            "drug_name": ", ".join(data.get("drug_names", ["Unknown"])),
+            "report_date": str(data.get("report_date", "Unknown"))
         }
     except Exception as e:
         print(f"  ⚠️  Metadata extraction failed: {e}")
@@ -90,19 +83,16 @@ def extract_metadata_with_ai(text_content: str) -> dict:
 def chunk_text(text, chunk_size=1000, overlap=100):
     chunks = []
     start = 0
-
     while start < len(text):
         chunk = text[start:start + chunk_size].strip()
         if chunk:
             chunks.append(chunk)
         start += chunk_size - overlap
-
     return chunks
 
 
 def _index_markdown_file(collection, md_path: Path) -> int:
-    """Read, dedupe, chunk, embed, and add a single markdown file.
-    Returns the number of chunks added (0 if skipped)."""
+    """Read, dedupe, chunk, embed, and add a single markdown file."""
     with open(md_path, "r", encoding="utf-8") as f:
         content = f.read()
 
@@ -118,16 +108,13 @@ def _index_markdown_file(collection, md_path: Path) -> int:
         print(f"  ⏭️ Already indexed: {md_path.name}")
         return 0
 
-    # LLM-based metadata extraction (handles varied header formats).
     print(f"  🧠 AI extracting metadata from {md_path.name}...")
     ai_meta = extract_metadata_with_ai(content)
 
     chunks = chunk_text(content)
     timestamp = datetime.utcnow().isoformat()
 
-    ids = []
-    documents = []
-    metadatas = []
+    ids, documents, metadatas = [], [], []
 
     for i, chunk in enumerate(chunks):
         ids.append(f"{doc_id}_chunk_{i}")
@@ -153,7 +140,7 @@ def _index_markdown_file(collection, md_path: Path) -> int:
 
 def index_single_markdown(md_path: Path) -> int:
     """Per-upload entry point: index one markdown file into pharma_db."""
-    return _index_markdown_file(get_collection(), md_path)
+    return _index_markdown_file(get_collection(), Path(md_path))
 
 
 def index_processed_data():
