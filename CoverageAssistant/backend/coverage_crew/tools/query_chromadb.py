@@ -13,6 +13,9 @@ COLLECTION_NAME = "pharma_reports"
 
 
 _BULLET_PATTERN = re.compile(r'[\u25cf\u25cb\u2022\u2013\u2014●•–—]\s*')
+_TOKEN_RE = re.compile(r'[A-Za-z][A-Za-z0-9-]+')
+_MAX_SENTENCE_CHARS = 300
+_DENSE_WINDOW_CHARS = 240
 
 
 class QueryDBToolInput(BaseModel):
@@ -34,38 +37,142 @@ class QueryDBTool(BaseTool):
     @staticmethod
     def _keywords(name: str) -> list:
         """
-        Split a name into individual lowercase keywords longer than 3 chars.
-        Handles multi-word names like 'Eli Lilly' → ['lilly']
-        or 'Lebrikizumab' → ['lebrikizumab'].
-        """
-        return [w.lower() for w in name.split() if len(w) > 3]
+        Extract lowercase alphanumeric tokens (>=4 chars) from a name.
 
-    def _extract_best_sentence(self, chunk: str, claim: str) -> str:
+        Strips parens/commas/semicolons so that multi-entity inputs like
+        "Sonrotoclax (BCL2i), Zanubrutinib, Venetoclax" yield clean tokens
+        ['sonrotoclax', 'bcl2i', 'zanubrutinib', 'venetoclax'] instead of
+        the punctuation-trailing ['sonrotoclax', '(bcl2i),', 'zanubrutinib,', ...]
+        that whitespace-splitting produced — those wouldn't substring-match
+        per-drug metadata values like 'Zanubrutinib'.
         """
-        Return the single sentence from a raw chunk that best matches the claim.
+        return [tok.lower() for tok in _TOKEN_RE.findall(name) if len(tok) >= 4]
+
+    @staticmethod
+    def _split_entities(raw: Optional[str]) -> list[str]:
         """
-        flat = _BULLET_PATTERN.sub('', chunk)
-        flat = re.sub(r'\s+', ' ', flat).strip()
+        Split a metadata string into entity candidates.
 
-        sentences = re.split(r'(?<=[.!?])\s+', flat)
-        sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
+        Metadata usually arrives as a comma-joined list like
+        "Jaypirca, Venetoclax, Acalabrutinib". We keep multi-word entities
+        intact while splitting on top-level commas/semicolons/slashes.
+        """
+        if not raw:
+            return []
+        parts = re.split(r"\s*[;,/]\s*", raw)
+        return [part.strip() for part in parts if part.strip()]
 
-        if not sentences:
-            return flat[:250]
+    def _select_claim_entities(self, claim_text: str, raw_entities: Optional[str]) -> list[str]:
+        """
+        Narrow document-level metadata to the entities explicitly mentioned
+        in the claim text. If there is only one entity overall, keep it.
+        If nothing is mentioned explicitly, fall back to the first entity as
+        the document's primary focus instead of dropping the filter entirely.
+        """
+        entities = self._split_entities(raw_entities)
+        if len(entities) <= 1:
+            return entities
+
+        claim_lower = claim_text.lower()
+        matched = []
+        for entity in entities:
+            kws = self._keywords(entity)
+            if kws and any(kw in claim_lower for kw in kws):
+                matched.append(entity)
+        if matched:
+            return matched
+        return entities[:1]
+
+    def _extract_best_sentence(self, chunk: str, claim: str, drug_focus: str = "") -> str:
+        cleaned = _BULLET_PATTERN.sub('', chunk)
+
+        candidates = []
+        for line in cleaned.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+            for piece in re.split(r'(?<=[.!?])\s+', line):
+                piece = re.sub(r'\s+', ' ', piece).strip()
+                if len(piece) >= 15:
+                    candidates.append(piece)
+
+        if not candidates:
+            return re.sub(r'\s+', ' ', cleaned).strip()[:_DENSE_WINDOW_CHARS]
 
         claim_lower = claim.lower().strip()
 
-        for sentence in sentences:
-            s_lower = sentence.lower()
-            if claim_lower in s_lower or s_lower in claim_lower:
-                return sentence
+        for cand in candidates:
+            c_lower = cand.lower()
+            if claim_lower in c_lower or c_lower in claim_lower:
+                if len(cand) > _MAX_SENTENCE_CHARS:
+                    return self._extract_dense_window(cand, claim, drug_focus)
+                return cand
 
-        claim_words = set(claim_lower.split())
-        best = max(
-            sentences,
-            key=lambda s: len(claim_words & set(s.lower().split()))
-        )
+        if drug_focus:
+            focus_kws = self._keywords(drug_focus)
+            focused = [c for c in candidates if any(kw in c.lower() for kw in focus_kws)]
+            if focused:
+                candidates = focused
+
+        claim_words = set(_TOKEN_RE.findall(claim_lower))
+        if not claim_words:
+            return min(candidates, key=len)
+
+        def _score(s):
+            s_words = set(_TOKEN_RE.findall(s.lower()))
+            return (len(claim_words & s_words), -len(s))
+
+        best = max(candidates, key=_score)
+        if len(best) > _MAX_SENTENCE_CHARS:
+            return self._extract_dense_window(best, claim, drug_focus)
         return best
+
+    def _extract_dense_window(self, text: str, claim: str, drug_focus: str = "") -> str:
+        """
+        For run-on text without sentence punctuation, return the ~240-char
+        window centered on the highest concentration of claim/drug keywords.
+        Window is trimmed to whitespace boundaries so we don't cut mid-word.
+        """
+        claim_lower = claim.lower()
+        text_lower = text.lower()
+
+        # Build the keyword set: claim tokens (>=4 chars) + drug-focus tokens.
+        keywords = {tok for tok in _TOKEN_RE.findall(claim_lower) if len(tok) >= 4}
+        if drug_focus:
+            keywords.update(self._keywords(drug_focus))
+        if not keywords:
+            return text[:_DENSE_WINDOW_CHARS]
+
+        # All hit positions of any keyword in the text.
+        hits = []
+        for kw in keywords:
+            start = 0
+            while True:
+                idx = text_lower.find(kw, start)
+                if idx == -1:
+                    break
+                hits.append(idx)
+                start = idx + len(kw)
+        if not hits:
+            return text[:_DENSE_WINDOW_CHARS]
+
+        half = _DENSE_WINDOW_CHARS // 2
+        best_center = hits[0]
+        best_density = 0
+        for center in hits:
+            lo, hi = center - half, center + half
+            density = sum(1 for h in hits if lo <= h <= hi)
+            if density > best_density:
+                best_density = density
+                best_center = center
+
+        lo = max(0, best_center - half)
+        hi = min(len(text), best_center + half)
+        while lo > 0 and not text[lo - 1].isspace():
+            lo -= 1
+        while hi < len(text) and not text[hi].isspace():
+            hi += 1
+        return text[lo:hi].strip()
 
     def search_with_metadata(
         self,
@@ -81,6 +188,17 @@ class QueryDBTool(BaseTool):
             print(f"  company: {company_name}")
 
         try:
+            focused_drugs = self._select_claim_entities(claim_text, drug_name)
+            focused_companies = self._select_claim_entities(claim_text, company_name)
+
+            effective_drug_name = ", ".join(focused_drugs) if focused_drugs else None
+            effective_company_name = ", ".join(focused_companies) if focused_companies else None
+
+            if effective_drug_name and effective_drug_name != drug_name:
+                print(f"  focused drug metadata   : {effective_drug_name}")
+            if effective_company_name and effective_company_name != company_name:
+                print(f"  focused company metadata: {effective_company_name}")
+
             embeddings = OllamaEmbeddings(model="nomic-embed-text")
             vector_store = Chroma(
                 collection_name=COLLECTION_NAME,
@@ -88,8 +206,8 @@ class QueryDBTool(BaseTool):
                 embedding_function=embeddings,
             )
 
-            drug_keywords = self._keywords(drug_name) if drug_name else []
-            company_keywords = self._keywords(company_name) if company_name else []
+            drug_keywords = self._keywords(effective_drug_name) if effective_drug_name else []
+            company_keywords = self._keywords(effective_company_name) if effective_company_name else []
 
             drug_company_filter = None
             if drug_keywords or company_keywords:
@@ -107,7 +225,7 @@ class QueryDBTool(BaseTool):
                         if kw in company_val:
                             matched_companies.add(meta["company_name"])
 
-                if drug_name and not matched_drugs:
+                if effective_drug_name and not matched_drugs:
                     print("  drug was specified but no chunk has that drug; "
                           "refusing company-only fallback — returning no match")
                     return {"text": "No historical matches found", "report_date": "Unknown"}
@@ -132,16 +250,16 @@ class QueryDBTool(BaseTool):
                     print(f"  drug/company filter: {drug_company_filter}")
                 else:
                     print("  no metadata matched drug/company keywords")
-            if (drug_name or company_name) and drug_company_filter is None:
+            if (effective_drug_name or effective_company_name) and drug_company_filter is None:
                 print("  caller specified drug/company but no matching chunks exist; "
                       "returning no match (refusing to fall back to unfiltered search)")
                 return {"text": "No historical matches found", "report_date": "Unknown"}
 
             query_parts = []
-            if drug_name:
-                query_parts.append(drug_name)
-            if company_name:
-                query_parts.append(company_name)
+            if effective_drug_name:
+                query_parts.append(effective_drug_name)
+            if effective_company_name:
+                query_parts.append(effective_company_name)
             query_parts.append(claim_text)
             enriched_query = " ".join(query_parts)
 
@@ -156,13 +274,20 @@ class QueryDBTool(BaseTool):
                 label = str(attempt_filter) if attempt_filter else "no filter"
 
                 scored_raw = vector_store.similarity_search_with_relevance_scores(
-                    enriched_query, k=10, filter=attempt_filter
+                    enriched_query, k=20, filter=attempt_filter
                 )
                 if not scored_raw:
                     print(f"  query empty with: {label}; trying next fallback")
                     continue
 
-                scored = scored_raw
+
+                seen_chunks = {}
+                for doc, score in scored_raw:
+                    meta = doc.metadata or {}
+                    key = (meta.get("source"), meta.get("chunk_index"))
+                    if key not in seen_chunks or seen_chunks[key][1] < score:
+                        seen_chunks[key] = (doc, score)
+                scored = sorted(seen_chunks.values(), key=lambda ds: ds[1], reverse=True)
                 scope = "all dates"
 
                 display = scored[:3]
@@ -189,7 +314,10 @@ class QueryDBTool(BaseTool):
             if winner is None:
                 return {"text": "No historical matches found", "report_date": "Unknown"}
 
-            best_sentence = self._extract_best_sentence(winner.page_content, claim_text)
+            winner_drug = (winner.metadata or {}).get("drug_name", "") if winner.metadata else ""
+            best_sentence = self._extract_best_sentence(
+                winner.page_content, claim_text, drug_focus=winner_drug
+            )
             report_date = winner.metadata.get("report_date", "Unknown") if winner.metadata else "Unknown"
             print(f"  returning (score={winner_score:.3f}): {best_sentence}")
             print(f"  report_date: {report_date}")
