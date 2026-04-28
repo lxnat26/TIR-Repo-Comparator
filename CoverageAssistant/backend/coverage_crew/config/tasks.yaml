@@ -9,9 +9,14 @@ claim_extractor_task:
     Output must match schema exactly. 
 
     Claim type definitions:
-    - 'milestone': trial phase initiation or completion, FDA submission, FDA approval, drug approval, data release, enrollment updates, regulatory decisions, marketing authorization
-    - 'efficacy': how well the drug works — response rates, clinical improvement scores, endpoint results, comparative effectiveness data
+    - 'efficacy': the scientific or clinical result itself — how well the drug works under study conditions. Use for endpoint success, response rates, survival improvements, remission depth, comparative performance, or any statement showing the treatment effect.
+    - 'milestone': the strategic, development, regulatory, or field-level significance of the event — why the result matters for company progress, label expansion, trial advancement, competitive positioning, first/only status, breakthrough significance, or other major development-stage achievements. 
     - 'safety': side effects, tolerability, adverse events, grade events, discontinuation rates due to adverse effects
+
+    IMPORTANT distinction between efficacy and milestone:
+    - If the sentence reports the clinical readout itself, such as meeting an endpoint, improving PFS, ORR, EASI, uMRD, or other efficacy measures, classify it as 'efficacy'.
+    - If the sentence explains the business, strategic, regulatory, or development importance of that result, classify it as 'milestone'.
+    - Do not label a clinical result as 'milestone' just because it is important. Use 'milestone' only when the sentence is about the progress or significance created by the result.
   
     'claim_type' MUST be 'milestone', 'efficacy', 'safety'
     'claim_type' MUST have only one of those types: 'milestone', 'efficacy', 'safety'
@@ -23,7 +28,7 @@ claim_extractor_task:
     - When claim_type is 'milestone', specific_type MUST be exactly one of:
         "drug approval"  — the drug has received marketing authorization from a regulator
         "fda"            — any FDA-related action, submission, decision, or communication
-        "data release"   — clinical trial data, readouts, results, or data publication
+        "data release"   — a data readout, trial result announcement, or milestone statement about the significance of newly released data
       If the milestone claim does not clearly map to one of the above, specific_type MUST be "".
     - specific_type is case-sensitive and must be a literal string from the allowed set or "".
 
@@ -93,24 +98,32 @@ claim_classifier_task:
 
     For EACH object in the array, classify the claim using these rules:
     Classification rules:
-    - 'Already Reported': claim and historical match describe the exact same finding with no new details, drug name substitutes are considered 'Already Reported'. — analyst can copy previous text directly
-    - 'Refined Detail': claim describes the same topic as the historical match but with changed or additional specifics — same drug/trial but different numbers, updated phase, or added context. Analyst needs to revise previous text.
-    - 'New Information': historical_match is "No historical matches found" OR the claim describes a completely different topic with no overlap to the historical match. Analyst must write this from scratch.
+    - 'Already Reported': claim and historical match describe the exact same finding with no new details, drug name substitutes are considered 'Already Reported'. 
+    - 'Refined Detail': claim describes the same topic as the historical match but with changed or additional specifics — same drug/trial but different numbers, updated phase, or added context.
+    - 'New Information': historical_match is "No historical matches found" OR the claim describes a completely different topic with no overlap to the historical match.
 
     IMPORTANT: If historical_match is "No historical matches found", classification MUST be 'New Information'.
     IMPORTANT: 'Refined Detail' requires a meaningful historical match on the SAME topic. If the historical match is about a different subject entirely, use 'New Information' instead.
     IMPORTANT: Do NOT use 'Contradiction' or 'Uncertain' — every claim must be 'Already Reported', 'Refined Detail', or 'New Information'.
     IMPORTANT: Copy "specific_type" VERBATIM from each comparator output object into your output object. Do not alter it.
+    IMPORTANT: "historical_claim" must be the exact historical match text from the input object. Never leave it blank when a historical match exists.
 
     Always provide a specific reason explaining your classification for each claim.
     When writing the reason:
-     - For milestone claims: always describe the development stage explicitly. 
-        State what stage was previously reported and what stage is now being reported. 
-        Mention if it does have fda, drug approval, or data release if applicable.
-      - Always write reason as if explaining to an analyst who needs to quickly understand 
+     - For milestone claims: always explain the strategic or development significance explicitly.
+        State what business, regulatory, or program-level progress was previously reported and what is now being reported.
+        Mention if it involves fda, drug approval, or data release when applicable.
+     - For efficacy claims: focus on the clinical result itself.
+        State what efficacy result was previously reported and whether the current claim repeats it or adds new efficacy detail.
+      - Always write reason as if explaining to a CI analyst who needs to quickly understand
     whether action is needed. Write the reason as a clear, concise explanation for a pharmaceutical analyst.
-      - It should explain what was found in prior reports and why this classification was chosen.
-    Do not reference field names like 'historical_match' or 'what_changed' — explain the finding in plain language.
+      - Focus on the substantive comparison: what was previously reported, what is unchanged, and what is newly added, updated, or different in the current claim.
+      - If the claim is 'Already Reported', say that the same finding was previously covered and there are no material new details.
+      - If the claim is 'Refined Detail', explicitly state which detail is new or updated versus the prior report.
+      - If the claim is 'New Information', explain that this topic or finding has not been previously reported and summarize the new angle in analyst-friendly language.
+      - Highlight the business or competitive implication only when it is explicitly supported by the claim text and historical text.
+    Do not reference field names, pipeline terms, or placeholders such as 'historical_match', 'historical_claim', 'what_changed', 'what_is_same', 'N/A', '(empty)', or 'No historical matches found'.
+    Do not say that a field is empty or missing. Explain the comparison outcome in plain language only.
     
     Return ONLY a valid JSON ARRAY — one classification object per input comparison object.
     No markdown. No commentary. No additional keys.
@@ -127,4 +140,3 @@ claim_classifier_task:
       }
     ]
   agent: claim_classifier
-
