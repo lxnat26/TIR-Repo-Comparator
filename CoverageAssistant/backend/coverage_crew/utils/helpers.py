@@ -79,8 +79,22 @@ def extract_metadata_from_filename(filename: str) -> dict:
     """Pull company/drug/date from filename like 2024_lilly_lebrikizumab_phase2.md."""
     stem = Path(filename).stem
     parts = stem.split("_")
+
+    def _clean_label(value: str) -> str:
+        value = value.strip()
+        if not value:
+            return "Unknown"
+        if value.isupper() or "-" in value:
+            return value
+        return value[:1].upper() + value[1:]
+
+    company_raw = parts[1] if len(parts) > 1 else ""
+    drug_raw = parts[2] if len(parts) > 2 else ""
+
+    drug_token = drug_raw.split()[0] if drug_raw.split() else ""
+
     return {
         "report_date": parts[0] if parts and parts[0].isdigit() else "Unknown",
-        "company_name": parts[1].capitalize() if len(parts) > 1 else "Unknown",
-        "drug_name": parts[2].capitalize() if len(parts) > 2 else "Unknown",
+        "company_name": _clean_label(company_raw),
+        "drug_name": _clean_label(drug_token),
     }
